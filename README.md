@@ -44,8 +44,22 @@ python -m pip install -e .
 
 ## Interface language
 
-Italian is the default language. Select English with `--language`; the option may be
-placed before or after a command:
+Italian is the initial default language. Save your preferred language once with:
+
+```bash
+harica-client language set en
+harica-client language status
+```
+
+The preference is stored in `${XDG_CONFIG_HOME}/harica-client/language`, or in
+`~/.config/harica-client/language` when `XDG_CONFIG_HOME` is unset. To remove it:
+
+```bash
+harica-client language reset
+```
+
+Use `--language` only for an occasional override; the option may be placed before or
+after a command:
 
 ```bash
 harica-client --language en list --status valid
@@ -58,9 +72,9 @@ For cron jobs and servers, set `HARICA_CLIENT_LANGUAGE`:
 HARICA_CLIENT_LANGUAGE=en harica-client list --status valid
 ```
 
-Precedence is `--language`, `HARICA_CLIENT_LANGUAGE`, then `it`. Only `it` and `en` are
-accepted. Language selection changes help, prompts, messages, and errors; it does not
-change command names, option names, or JSON/CSV data.
+Precedence is `--language`, `HARICA_CLIENT_LANGUAGE`, the saved preference, then `it`.
+Only `it` and `en` are accepted. Language selection changes help, prompts, messages,
+and errors; it does not change command names, option names, or JSON/CSV data.
 
 ## Secure API key configuration
 

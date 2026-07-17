@@ -34,10 +34,13 @@ from .errors import (
 from .i18n import (
     SUPPORTED_LANGUAGES,
     LanguageSelectionError,
+    delete_saved_language,
+    default_language_path,
     localize_argparse_error,
-    resolve_language,
+    resolve_language_preference,
     tr,
     using_language,
+    write_saved_language,
 )
 
 _FQDN_FIELDS = frozenset(
@@ -171,6 +174,42 @@ def build_parser() -> argparse.ArgumentParser:
     _add_language_argument(version_parser)
     version_parser.set_defaults(handler=_run_version)
 
+    language_parser = subparsers.add_parser(
+        "language",
+        help=tr("help_language_command"),
+    )
+    _add_language_argument(language_parser)
+    language_subparsers = language_parser.add_subparsers(
+        dest="language_command",
+        required=True,
+    )
+
+    language_set_parser = language_subparsers.add_parser(
+        "set",
+        help=tr("help_language_set"),
+    )
+    _add_language_argument(language_set_parser)
+    language_set_parser.add_argument(
+        "language_value",
+        choices=SUPPORTED_LANGUAGES,
+        help=tr("language_value"),
+    )
+    language_set_parser.set_defaults(handler=_run_language_set)
+
+    language_status_parser = language_subparsers.add_parser(
+        "status",
+        help=tr("help_language_status"),
+    )
+    _add_language_argument(language_status_parser)
+    language_status_parser.set_defaults(handler=_run_language_status)
+
+    language_reset_parser = language_subparsers.add_parser(
+        "reset",
+        help=tr("help_language_reset"),
+    )
+    _add_language_argument(language_reset_parser)
+    language_reset_parser.set_defaults(handler=_run_language_reset)
+
     list_parser = subparsers.add_parser("list", help=tr("help_list"))
     _add_language_argument(list_parser)
     list_parser.add_argument(
@@ -264,6 +303,32 @@ def _client_from_args(args: argparse.Namespace) -> HaricaClient:
 
 def _run_version(_args: argparse.Namespace) -> int:
     print(__version__)
+    return 0
+
+
+def _run_language_set(args: argparse.Namespace) -> int:
+    path = write_saved_language(args.language_value)
+    with using_language(args.language_value):
+        print(tr("language_saved", language=args.language_value, path=path))
+    return 0
+
+
+def _run_language_status(args: argparse.Namespace) -> int:
+    preference = args.language_preference
+    source = tr(f"language_source_{preference.source}")
+    print(f"{tr('language_label')}: {preference.language}")
+    print(f"{tr('source')}: {source}")
+    path = preference.path or default_language_path()
+    print(f"{tr('path')}: {path}")
+    return 0
+
+
+def _run_language_reset(_args: argparse.Namespace) -> int:
+    path = delete_saved_language()
+    if path is None:
+        print(tr("language_not_saved"))
+    else:
+        print(tr("language_reset", path=path))
     return 0
 
 
@@ -733,15 +798,16 @@ def _cell(value: Any) -> str:
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     try:
-        language = resolve_language(arguments)
+        preference = resolve_language_preference(arguments)
     except LanguageSelectionError as exc:
         with using_language(exc.fallback_language):
             parser = build_parser()
-            parser.error(tr(exc.message_key, value=exc.value))
+            parser.error(str(exc))
 
-    with using_language(language):
+    with using_language(preference.language):
         parser = build_parser()
         args = parser.parse_args(arguments)
+        args.language_preference = preference
         try:
             return int(args.handler(args))
         except HaricaRateLimitError as exc:

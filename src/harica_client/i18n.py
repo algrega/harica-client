@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import os
 import re
+import stat
+import tempfile
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterator
 
 SUPPORTED_LANGUAGES = ("it", "en")
@@ -27,7 +30,32 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "error": "Errore",
         "configuration_error": "Errore di configurazione",
         "response_preview": "Anteprima risposta",
-        "help_language": "Lingua dell'interfaccia (default: it)",
+        "help_language": "Lingua per questa esecuzione; sovrascrive la preferenza salvata",
+        "help_language_command": "Gestisce la preferenza persistente della lingua",
+        "help_language_set": "Salva la lingua predefinita",
+        "help_language_status": "Mostra lingua effettiva, origine e configurazione",
+        "help_language_reset": "Rimuove la preferenza di lingua salvata",
+        "language_value": "Lingua da salvare",
+        "language_label": "Lingua",
+        "language_saved": "Lingua predefinita salvata: {language} in {path}",
+        "language_reset": "Preferenza di lingua rimossa da {path}",
+        "language_not_saved": "Nessuna preferenza di lingua salvata da rimuovere.",
+        "language_source_flag": "opzione --language",
+        "language_source_environment": "variabile HARICA_CLIENT_LANGUAGE",
+        "language_source_saved": "preferenza salvata",
+        "language_source_default": "valore predefinito",
+        "language_file_not_regular": "Il percorso della lingua non è un file regolare: {value}",
+        "language_file_wrong_owner": (
+            "Il file della lingua non appartiene all'utente corrente: {value}"
+        ),
+        "language_file_writable": (
+            "Il file della lingua è scrivibile da gruppo o altri: {value}"
+        ),
+        "language_directory_unsafe": "La directory della lingua non è sicura: {value}",
+        "language_file_missing": "File della lingua non trovato: {value}",
+        "language_io_error": (
+            "Errore durante l'accesso alla configurazione della lingua: {value}"
+        ),
         "help_environment": "Ambiente HARICA (default: production)",
         "help_base_url": (
             "Base URL personalizzata, utile per test locali (sovrascrive --environment)"
@@ -166,7 +194,34 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "error": "Error",
         "configuration_error": "Configuration error",
         "response_preview": "Response preview",
-        "help_language": "Interface language (default: it)",
+        "help_language": "Language for this run; overrides the saved preference",
+        "help_language_command": "Manage the persistent language preference",
+        "help_language_set": "Save the default language",
+        "help_language_status": "Show the effective language, source, and configuration",
+        "help_language_reset": "Remove the saved language preference",
+        "language_value": "Language to save",
+        "language_label": "Language",
+        "language_saved": "Default language saved: {language} in {path}",
+        "language_reset": "Language preference removed from {path}",
+        "language_not_saved": "There is no saved language preference to remove.",
+        "language_source_flag": "--language option",
+        "language_source_environment": "HARICA_CLIENT_LANGUAGE variable",
+        "language_source_saved": "saved preference",
+        "language_source_default": "default value",
+        "language_file_not_regular": "Language path is not a regular file: {value}",
+        "language_file_wrong_owner": (
+            "Language file is not owned by the current user: {value}"
+        ),
+        "language_file_writable": (
+            "Language file is writable by group or others: {value}"
+        ),
+        "language_directory_unsafe": (
+            "Language configuration directory is unsafe: {value}"
+        ),
+        "language_file_missing": "Language file not found: {value}",
+        "language_io_error": (
+            "Error while accessing the language configuration: {value}"
+        ),
         "help_environment": "HARICA environment (default: production)",
         "help_base_url": "Custom base URL for local testing (overrides --environment)",
         "help_timeout": "HTTP timeout in seconds",
@@ -296,6 +351,18 @@ class LanguageSelectionError(ValueError):
     value: str | None = None
     fallback_language: str = DEFAULT_LANGUAGE
 
+    def __str__(self) -> str:
+        return tr(self.message_key, value=self.value)
+
+
+@dataclass(frozen=True, slots=True)
+class LanguagePreference:
+    """Lingua effettiva e relativa origine."""
+
+    language: str
+    source: str
+    path: Path | None = None
+
 
 def get_language() -> str:
     return _language.get()
@@ -315,11 +382,141 @@ def tr(message_key: str, **values: object) -> str:
     return template.format(**values)
 
 
-def resolve_language(
+def default_language_path(
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> Path:
+    """Restituisce il percorso XDG della preferenza persistente."""
+    current = os.environ if environ is None else environ
+    xdg_config_home = current.get("XDG_CONFIG_HOME", "").strip()
+    if xdg_config_home:
+        root = Path(xdg_config_home).expanduser()
+        if not root.is_absolute():
+            raise LanguageSelectionError("absolute_xdg")
+    else:
+        configured_home = current.get("HOME", "").strip()
+        root = (Path(configured_home).expanduser() if configured_home else Path.home()) / ".config"
+        if not root.is_absolute():
+            raise LanguageSelectionError("absolute_home")
+    return Path(os.path.abspath(root / "harica-client" / "language"))
+
+
+def read_saved_language(
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> LanguagePreference | None:
+    """Legge la preferenza persistente dopo controlli POSIX di base."""
+    path = default_language_path(environ=environ)
+    if not _validate_saved_language_metadata(path, missing_ok=True):
+        return None
+    try:
+        selected = path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise _language_io_error(path, exc) from exc
+    if selected not in SUPPORTED_LANGUAGES:
+        raise LanguageSelectionError("language_invalid", value=selected)
+    return LanguagePreference(selected, "saved", path)
+
+
+def _validate_saved_language_metadata(path: Path, *, missing_ok: bool) -> bool:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        if missing_ok:
+            return False
+        raise LanguageSelectionError("language_file_missing", value=str(path)) from None
+    except OSError as exc:
+        raise _language_io_error(path, exc) from exc
+
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        raise LanguageSelectionError("language_file_not_regular", value=str(path))
+    if metadata.st_uid != os.geteuid():
+        raise LanguageSelectionError("language_file_wrong_owner", value=str(path))
+    if metadata.st_mode & 0o022:
+        raise LanguageSelectionError("language_file_writable", value=str(path))
+    return True
+
+
+def write_saved_language(
+    language: str,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> Path:
+    """Salva atomicamente una preferenza con directory 0700 e file 0600."""
+    if language not in SUPPORTED_LANGUAGES:
+        raise LanguageSelectionError("language_invalid", value=language)
+    path = default_language_path(environ=environ)
+    directory = path.parent
+    previous_umask = os.umask(0o077)
+    try:
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except OSError as exc:
+        raise _language_io_error(directory, exc) from exc
+    finally:
+        os.umask(previous_umask)
+
+    try:
+        directory_metadata = directory.lstat()
+    except OSError as exc:
+        raise _language_io_error(directory, exc) from exc
+    if (
+        stat.S_ISLNK(directory_metadata.st_mode)
+        or not stat.S_ISDIR(directory_metadata.st_mode)
+        or directory_metadata.st_uid != os.geteuid()
+        or directory_metadata.st_mode & 0o022
+    ):
+        raise LanguageSelectionError("language_directory_unsafe", value=str(directory))
+    if path.exists() or path.is_symlink():
+        _validate_saved_language_metadata(path, missing_ok=False)
+
+    descriptor: int | None = None
+    temporary_path: Path | None = None
+    try:
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=".language.",
+            suffix=".tmp",
+            dir=directory,
+            text=True,
+        )
+        temporary_path = Path(temporary_name)
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+            descriptor = None
+            stream.write(f"{language}\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary_path, path)
+        temporary_path = None
+        os.chmod(path, 0o600)
+    except OSError as exc:
+        if descriptor is not None:
+            os.close(descriptor)
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+        raise _language_io_error(path, exc) from exc
+    return path
+
+
+def delete_saved_language(
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> Path | None:
+    """Rimuove la preferenza salvata; l'operazione è idempotente."""
+    path = default_language_path(environ=environ)
+    if not _validate_saved_language_metadata(path, missing_ok=True):
+        return None
+    try:
+        path.unlink()
+    except OSError as exc:
+        raise _language_io_error(path, exc) from exc
+    return path
+
+
+def resolve_language_preference(
     argv: Sequence[str],
     *,
     environ: Mapping[str, str] | None = None,
-) -> str:
+) -> LanguagePreference:
     """Risolve flag e variabile d'ambiente senza dipendere dal locale di sistema."""
     current = os.environ if environ is None else environ
     environment_value = current.get(LANGUAGE_ENV)
@@ -355,18 +552,35 @@ def resolve_language(
                 value=explicit,
                 fallback_language=fallback,
             )
-        return explicit
+        return LanguagePreference(explicit, "flag")
 
-    if environment_value is None:
-        return DEFAULT_LANGUAGE
-    selected = environment_value.strip()
-    if selected not in SUPPORTED_LANGUAGES:
-        raise LanguageSelectionError(
-            "language_invalid",
-            value=selected,
-            fallback_language=DEFAULT_LANGUAGE,
-        )
-    return selected
+    if environment_value is not None:
+        selected = environment_value.strip()
+        if selected not in SUPPORTED_LANGUAGES:
+            raise LanguageSelectionError(
+                "language_invalid",
+                value=selected,
+                fallback_language=DEFAULT_LANGUAGE,
+            )
+        return LanguagePreference(selected, "environment")
+
+    saved = read_saved_language(environ=current)
+    if saved is not None:
+        return saved
+    return LanguagePreference(DEFAULT_LANGUAGE, "default")
+
+
+def resolve_language(
+    argv: Sequence[str],
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> str:
+    """Restituisce soltanto il codice lingua per compatibilità interna."""
+    return resolve_language_preference(argv, environ=environ).language
+
+
+def _language_io_error(path: Path, error: OSError) -> LanguageSelectionError:
+    return LanguageSelectionError("language_io_error", value=f"{path}: {error}")
 
 
 def localize_argparse_error(message: str) -> str:

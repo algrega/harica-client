@@ -30,8 +30,23 @@ rate limit HTTP 429.
 
 ## Lingua dell'interfaccia
 
-L'italiano è la lingua predefinita. Puoi selezionare l'inglese con `--language`,
-posizionando l'opzione prima o dopo il comando:
+L'italiano è la lingua predefinita iniziale. Salva una volta la lingua preferita con:
+
+```bash
+harica-client language set en
+harica-client language status
+```
+
+La preferenza viene memorizzata in `${XDG_CONFIG_HOME}/harica-client/language` oppure,
+se `XDG_CONFIG_HOME` non è definita, in `~/.config/harica-client/language`. Per
+rimuoverla:
+
+```bash
+harica-client language reset
+```
+
+Usa `--language` soltanto come eccezione occasionale, posizionandolo prima o dopo il
+comando:
 
 ```bash
 harica-client --language en list --status valid
@@ -44,9 +59,9 @@ Per cron e server usa `HARICA_CLIENT_LANGUAGE`:
 HARICA_CLIENT_LANGUAGE=en harica-client list --status valid
 ```
 
-La precedenza è `--language`, `HARICA_CLIENT_LANGUAGE`, quindi `it`. Sono ammessi
-esclusivamente `it` ed `en`. La lingua modifica help, prompt, messaggi ed errori, ma
-non cambia comandi, opzioni o struttura degli export JSON e CSV.
+La precedenza è `--language`, `HARICA_CLIENT_LANGUAGE`, preferenza salvata, quindi `it`.
+Sono ammessi esclusivamente `it` ed `en`. La lingua modifica help, prompt, messaggi ed
+errori, ma non cambia comandi, opzioni o struttura degli export JSON e CSV.
 
 ## Requisiti e installazione
 

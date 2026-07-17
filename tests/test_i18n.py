@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import stat
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -13,20 +14,30 @@ from harica_client import HaricaClient
 from harica_client.cli import _render_or_export, main
 from harica_client.credentials import read_api_key_file, write_api_key_file
 from harica_client.errors import HaricaConfigurationError
-from harica_client.i18n import resolve_language, using_language
+from harica_client.i18n import (
+    LanguageSelectionError,
+    default_language_path,
+    resolve_language,
+    resolve_language_preference,
+    using_language,
+    write_saved_language,
+)
 
 
 class InternationalizationTests(unittest.TestCase):
     def _help(self, arguments: list[str], environment: dict[str, str] | None = None) -> str:
         output = io.StringIO()
         errors = io.StringIO()
-        with (
-            patch.dict("os.environ", environment or {}, clear=True),
-            redirect_stdout(output),
-            redirect_stderr(errors),
-            self.assertRaises(SystemExit) as caught,
-        ):
-            main(arguments)
+        with tempfile.TemporaryDirectory() as directory:
+            selected_environment = {"HOME": directory}
+            selected_environment.update(environment or {})
+            with (
+                patch.dict("os.environ", selected_environment, clear=True),
+                redirect_stdout(output),
+                redirect_stderr(errors),
+                self.assertRaises(SystemExit) as caught,
+            ):
+                main(arguments)
         self.assertEqual(caught.exception.code, 0)
         return output.getvalue() + errors.getvalue()
 
@@ -39,6 +50,100 @@ class InternationalizationTests(unittest.TestCase):
         rendered = self._help(["--help"], {"HARICA_CLIENT_LANGUAGE": "en"})
         self.assertIn("Show the version", rendered)
         self.assertIn("options:", rendered)
+
+    def test_persistent_language_lifecycle(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {"HOME": directory}
+            output = io.StringIO()
+            with (
+                patch.dict("os.environ", environment, clear=True),
+                redirect_stdout(output),
+            ):
+                set_code = main(["language", "set", "en"])
+                status_code = main(["language", "status"])
+
+            path = default_language_path(environ=environment)
+            self.assertEqual((set_code, status_code), (0, 0))
+            self.assertEqual(path.read_text(encoding="utf-8"), "en\n")
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE(path.parent.stat().st_mode), 0o700)
+            self.assertIn("Default language saved", output.getvalue())
+            self.assertIn("Language: en", output.getvalue())
+            self.assertIn("Source: saved preference", output.getvalue())
+
+            rendered = self._help(["--help"], environment)
+            self.assertIn("Show the version", rendered)
+
+            reset_output = io.StringIO()
+            with (
+                patch.dict("os.environ", environment, clear=True),
+                redirect_stdout(reset_output),
+            ):
+                reset_code = main(["language", "reset"])
+            self.assertEqual(reset_code, 0)
+            self.assertFalse(path.exists())
+            self.assertIn("Language preference removed", reset_output.getvalue())
+
+    def test_language_precedence_includes_saved_preference(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {"HOME": directory}
+            write_saved_language("en", environ=environment)
+
+            saved = resolve_language_preference(["version"], environ=environment)
+            from_environment = resolve_language_preference(
+                ["version"],
+                environ={**environment, "HARICA_CLIENT_LANGUAGE": "it"},
+            )
+            from_flag = resolve_language_preference(
+                ["--language", "en", "version"],
+                environ={**environment, "HARICA_CLIENT_LANGUAGE": "it"},
+            )
+
+        self.assertEqual((saved.language, saved.source), ("en", "saved"))
+        self.assertEqual(
+            (from_environment.language, from_environment.source),
+            ("it", "environment"),
+        )
+        self.assertEqual((from_flag.language, from_flag.source), ("en", "flag"))
+
+    def test_saved_language_uses_xdg_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {"XDG_CONFIG_HOME": directory}
+            path = write_saved_language("en", environ=environment)
+            preference = resolve_language_preference([], environ=environment)
+
+        self.assertEqual(path, Path(directory) / "harica-client/language")
+        self.assertEqual(preference.language, "en")
+
+    def test_unsafe_saved_language_file_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {"HOME": directory}
+            path = default_language_path(environ=environment)
+            path.parent.mkdir(mode=0o700, parents=True)
+            path.write_text("en\n", encoding="utf-8")
+            path.chmod(0o666)
+
+            with self.assertRaisesRegex(LanguageSelectionError, "scrivibile"):
+                resolve_language_preference([], environ=environment)
+
+    def test_explicit_override_can_repair_invalid_saved_language(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {"HOME": directory}
+            path = default_language_path(environ=environment)
+            path.parent.mkdir(mode=0o700, parents=True)
+            path.write_text("invalid\n", encoding="utf-8")
+            path.chmod(0o600)
+
+            with (
+                patch.dict("os.environ", environment, clear=True),
+                redirect_stdout(io.StringIO()),
+            ):
+                code = main(["--language", "it", "language", "set", "en"])
+
+            preference = resolve_language_preference([], environ=environment)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(preference.language, "en")
 
     def test_flag_works_before_and_after_commands(self) -> None:
         cases = (
