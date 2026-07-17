@@ -17,6 +17,7 @@ from harica_client import (
     HaricaResponseError,
     RetryPolicy,
 )
+from harica_client.i18n import using_language
 
 
 class _FakeResponse:
@@ -48,6 +49,7 @@ class _ScenarioTransport:
                 "path": urlsplit(request.full_url).path,
                 "api_key": request.get_header("X-api-key", ""),
                 "accept": request.get_header("Accept", ""),
+                "user_agent": request.get_header("User-agent", ""),
             }
         )
         status, headers, body = self.responses.popleft()
@@ -83,6 +85,7 @@ class HaricaClientTests(unittest.TestCase):
         )
         self.assertEqual(server.requests[0]["api_key"], "secret")
         self.assertEqual(server.requests[0]["accept"], "application/json")
+        self.assertEqual(server.requests[0]["user_agent"], "harica-client/0.10.0")
 
     def test_all_lists_and_combines_each_status(self) -> None:
         responses = [
@@ -183,6 +186,22 @@ class HaricaClientTests(unittest.TestCase):
         client = HaricaClient("secret")
         with self.assertRaises(HaricaConfigurationError):
             client.list_certificates("pending")
+
+    def test_rate_limit_error_is_localized_and_keeps_api_detail(self) -> None:
+        responses = [(429, {"Retry-After": "3"}, {"message": "server detail"})]
+        with using_language("en"), _ScenarioTransport(responses) as server:
+            client = HaricaClient(
+                "secret",
+                base_url=server.url,
+                retry_policy=RetryPolicy(max_attempts=1),
+            )
+            with self.assertRaises(HaricaRateLimitError) as caught:
+                client.list_certificates()
+
+        message = str(caught.exception)
+        self.assertIn("HARICA rate limit reached", message)
+        self.assertIn("retry in about 3 seconds", message)
+        self.assertIn("server detail", message)
 
 
 if __name__ == "__main__":

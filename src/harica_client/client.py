@@ -15,6 +15,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
+from . import __version__
 from .errors import (
     HaricaAuthError,
     HaricaConfigurationError,
@@ -24,6 +25,7 @@ from .errors import (
     HaricaResponseError,
     error_message_from_json,
 )
+from .i18n import tr
 
 
 class Environment(str, Enum):
@@ -52,9 +54,9 @@ class RetryPolicy:
 
     def __post_init__(self) -> None:
         if self.max_attempts < 1:
-            raise ValueError("max_attempts deve essere almeno 1")
+            raise ValueError(tr("retry_attempts_min"))
         if self.base_delay < 0 or self.max_delay < 0 or self.jitter < 0:
-            raise ValueError("I valori temporali della retry policy non possono essere negativi")
+            raise ValueError(tr("retry_values_non_negative"))
 
 
 class HaricaClient:
@@ -74,21 +76,21 @@ class HaricaClient:
         random_source: Callable[[], float] = random.random,
     ) -> None:
         if not api_key or not api_key.strip():
-            raise HaricaConfigurationError("API key HARICA assente")
+            raise HaricaConfigurationError(tr("api_key_missing"))
         if timeout <= 0:
-            raise HaricaConfigurationError("Il timeout deve essere maggiore di zero")
+            raise HaricaConfigurationError(tr("timeout_positive"))
 
         try:
             selected_environment = Environment(environment)
         except ValueError as exc:
             allowed = ", ".join(item.value for item in Environment)
             raise HaricaConfigurationError(
-                f"Ambiente HARICA non valido: {environment!r}. Valori ammessi: {allowed}"
+                tr("environment_invalid", environment=environment, allowed=allowed)
             ) from exc
 
         resolved_url = base_url or BASE_URLS[selected_environment]
         if not resolved_url.startswith(("https://", "http://")):
-            raise HaricaConfigurationError("La base URL deve iniziare con http:// o https://")
+            raise HaricaConfigurationError(tr("base_url_scheme"))
 
         self._api_key = api_key.strip()
         self.environment = selected_environment
@@ -109,9 +111,7 @@ class HaricaClient:
         if normalized == "all":
             return self._list_all_certificates(query=query)
         if normalized not in {"valid", "revoked", "expired"}:
-            raise HaricaConfigurationError(
-                "Stato non valido. Valori ammessi: valid, revoked, expired, all"
-            )
+            raise HaricaConfigurationError(tr("status_invalid"))
         return self._get_json(f"/cm/v1/admin/certificates/list/{normalized}", query=query)
 
     def _list_all_certificates(
@@ -142,15 +142,13 @@ class HaricaClient:
                 if isinstance(candidate, list):
                     return candidate
             return [response]
-        raise HaricaResponseError(
-            "HARICA ha restituito un formato inatteso durante l'elenco dei certificati"
-        )
+        raise HaricaResponseError(tr("list_format_unexpected"))
 
     def certificate_by_serial(self, serial_number: str) -> Any:
         """Cerca un certificato enterprise admin per numero seriale."""
         serial = serial_number.strip()
         if not serial:
-            raise HaricaConfigurationError("Il numero seriale non può essere vuoto")
+            raise HaricaConfigurationError(tr("serial_empty"))
         encoded = quote(serial, safe="")
         return self._get_json(f"/cm/v1/admin/certificates/serial/{encoded}")
 
@@ -174,7 +172,7 @@ class HaricaClient:
                 headers={
                     "Accept": "application/json",
                     "X-API-Key": self._api_key,
-                    "User-Agent": "harica-client/0.9.0",
+                    "User-Agent": f"harica-client/{__version__}",
                 },
             )
             try:
@@ -210,10 +208,10 @@ class HaricaClient:
                     continue
                 reason = getattr(exc, "reason", exc)
                 raise HaricaNetworkError(
-                    f"Richiesta HARICA non riuscita dopo {attempt} tentativi: {reason}"
+                    tr("network_failed_attempts", attempts=attempt, reason=reason)
                 ) from exc
 
-        raise HaricaNetworkError(f"Richiesta HARICA non riuscita: {last_network_error}")
+        raise HaricaNetworkError(tr("network_failed", reason=last_network_error))
 
     def _delay(self, attempt: int, *, retry_after: float | None) -> float:
         if retry_after is not None:
@@ -244,7 +242,7 @@ class HaricaClient:
         except json.JSONDecodeError as exc:
             content = body[:300]
             raise HaricaResponseError(
-                f"HARICA ha restituito HTTP {status_code} con un corpo non JSON",
+                tr("non_json_response", status_code=status_code),
                 body_preview=content,
             ) from exc
 
@@ -268,25 +266,23 @@ class HaricaClient:
         if status_code in {401, 403}:
             raise HaricaAuthError(
                 status_code,
-                f"Autenticazione o autorizzazione HARICA rifiutata (HTTP {status_code}){suffix}",
+                tr("auth_rejected", status_code=status_code, suffix=suffix),
                 body=body[:1000],
                 request_id=request_id,
             )
         if status_code == 429:
             wait_hint = (
-                f"; riprovare tra circa {retry_after:g} secondi"
-                if retry_after is not None
-                else ""
+                tr("retry_hint", seconds=retry_after) if retry_after is not None else ""
             )
             raise HaricaRateLimitError(
-                f"Rate limit HARICA raggiunto dopo tutti i tentativi{wait_hint}{suffix}",
+                tr("rate_limit", wait_hint=wait_hint, suffix=suffix),
                 retry_after=retry_after,
                 body=body[:1000],
                 request_id=request_id,
             )
         raise HaricaHTTPError(
             status_code,
-            f"Richiesta HARICA rifiutata (HTTP {status_code}){suffix}",
+            tr("request_rejected", status_code=status_code, suffix=suffix),
             body=body[:1000],
             request_id=request_id,
         )

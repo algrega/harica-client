@@ -1,36 +1,39 @@
 # harica-client
 
-Client Python sincrono e CLI per consultare i certificati tramite le API key ufficiali
-di HARICA Certificate Manager.
+**English** | [Italiano](README.it.md)
 
-Questo è un progetto indipendente e non ufficiale. Non è affiliato, approvato o
-supportato da HARICA.
+Synchronous Python client and CLI for querying certificates through the official
+HARICA Certificate Manager API keys.
 
-Il progetto è intenzionalmente piccolo e prudente: può conservare l'API key in un file
-locale protetto, non la accetta come argomento della CLI e gestisce esplicitamente il
-rate limit HTTP 429.
+This is an independent, unofficial project. It is not affiliated with, endorsed by,
+or supported by HARICA.
 
-## Funzionalità
+The project is deliberately small and cautious: it can store the API key in a protected
+local file, never accepts the key as a CLI argument, and explicitly handles HTTP 429
+rate limiting.
 
-- autenticazione tramite header `X-API-Key`;
-- credenziali separate per ambiente, adatte a esecuzioni manuali e cron;
-- ambienti `production`, `staging` e `development`;
-- elenco certificati `valid`, `revoked`, `expired` oppure di tutti gli stati;
-- ricerca di un certificato per numero seriale;
-- ricerca locale per FQDN, `friendlyName` e indirizzo email;
-- retry di `429`, `502`, `503` e `504` con backoff esponenziale e jitter;
-- supporto a `Retry-After` sia in secondi sia come data HTTP;
-- errori distinti per autenticazione, rate limit, rete, HTTP e risposta non JSON;
-- output tabellare o JSON ed esportazione CSV;
-- colonna `CN` nell'output tabellare, ricavata anche dal campo `dN`;
-- nessuna dipendenza runtime esterna.
+## Features
 
-## Requisiti e installazione
+- authentication through the `X-API-Key` header;
+- separate credentials for each environment, suitable for manual and cron execution;
+- `production`, `staging`, and `development` environments;
+- listing `valid`, `revoked`, `expired`, or all certificates;
+- certificate lookup by serial number;
+- local filtering by FQDN, `friendlyName`, and email address;
+- retries for `429`, `502`, `503`, and `504` with exponential backoff and jitter;
+- support for `Retry-After` as seconds or an HTTP date;
+- distinct errors for authentication, rate limiting, networking, HTTP, and non-JSON responses;
+- table or JSON output and CSV export;
+- a `CN` field derived from `dN` when necessary;
+- Italian and English CLI messages;
+- no external runtime dependencies.
 
-- Python 3.10 o successivo;
-- account HARICA con 2FA;
-- ruolo Enterprise Admin per gli endpoint implementati;
-- API key creata nel profilo HARICA.
+## Requirements and installation
+
+- Python 3.10 or later;
+- a HARICA account with 2FA;
+- the Enterprise Admin role for the implemented endpoints;
+- an API key created in the HARICA profile.
 
 ```bash
 python3 -m venv .venv
@@ -39,32 +42,52 @@ python -m pip install --upgrade pip
 python -m pip install -e .
 ```
 
-## Configurazione sicura della chiave
+## Interface language
 
-Salva la chiave una sola volta con input nascosto e doppia conferma:
+Italian is the default language. Select English with `--language`; the option may be
+placed before or after a command:
+
+```bash
+harica-client --language en list --status valid
+harica-client list --status valid --language en
+```
+
+For cron jobs and servers, set `HARICA_CLIENT_LANGUAGE`:
+
+```bash
+HARICA_CLIENT_LANGUAGE=en harica-client list --status valid
+```
+
+Precedence is `--language`, `HARICA_CLIENT_LANGUAGE`, then `it`. Only `it` and `en` are
+accepted. Language selection changes help, prompts, messages, and errors; it does not
+change command names, option names, or JSON/CSV data.
+
+## Secure API key configuration
+
+Save the key once using hidden input and double confirmation:
 
 ```bash
 harica-client auth set --environment production
 harica-client auth status --environment production
 ```
 
-Il percorso predefinito è:
+The default path is:
 
 ```text
 ${XDG_CONFIG_HOME}/harica-client/credentials/{environment}.key
 ```
 
-Se `XDG_CONFIG_HOME` non è definita viene usato:
+If `XDG_CONFIG_HOME` is unset, the client uses:
 
 ```text
 ~/.config/harica-client/credentials/{environment}.key
 ```
 
-La directory viene creata con permessi `0700` e il file con `0600`. La lettura rifiuta
-directory condivise, link simbolici, file non regolari, proprietario diverso dall'utente
-corrente, permessi per gruppo/altri e file vuoti.
+The directory is created with mode `0700` and the file with mode `0600`. Reading rejects
+shared directories, symbolic links, non-regular files, files owned by another user,
+group/other permissions, and empty files.
 
-È possibile mantenere una chiave distinta per ciascun ambiente:
+A separate key can be stored for each environment:
 
 ```bash
 harica-client auth set --environment production
@@ -72,7 +95,7 @@ harica-client auth set --environment staging
 harica-client auth set --environment development
 ```
 
-Per usare un percorso amministrato esplicitamente:
+To use an explicitly managed path:
 
 ```bash
 harica-client auth set \
@@ -80,72 +103,63 @@ harica-client auth set \
   --api-key-file /home/harica/secrets/production.key
 ```
 
-La directory specificata deve già essere sicura oppure deve poter essere creata dal
-client. Un percorso esplicito può essere utilizzato anche tramite
-`HARICA_API_KEY_FILE`; la variabile contiene solo il percorso, non la chiave.
-
-La precedenza è:
+The explicit path can also be supplied through `HARICA_API_KEY_FILE`, which contains
+only a path and not the secret. Credential precedence is:
 
 1. `--api-key-file`;
-2. `HARICA_API_KEY`, mantenuta per compatibilità e CI;
+2. `HARICA_API_KEY`, retained for compatibility and CI;
 3. `HARICA_API_KEY_FILE`;
-4. file predefinito dell'ambiente.
+4. the environment's default file.
 
-### Rotazione e cancellazione
+### Rotation, migration, and deletion
 
-Se la chiave era stata configurata con una versione `harica-safe`, può essere migrata
-senza reinserirla e senza mostrarla:
+Migrate a key previously stored by `harica-safe` without entering or displaying it:
 
 ```bash
 harica-client auth migrate --environment production
 ```
 
-In assenza della migrazione, `harica-client` continua temporaneamente a leggere il vecchio
-percorso come fallback. Ogni nuovo `auth set` scrive esclusivamente nel percorso
-`harica-client`.
+Without migration, `harica-client` temporarily reads the legacy path as a fallback.
+Every new `auth set` writes only to the `harica-client` path.
 
-Per sostituire la chiave, ripeti `auth set`: il nuovo file viene scritto atomicamente.
+Run `auth set` again to rotate a key. The new file is written atomically:
 
 ```bash
 harica-client auth set --environment production
 ```
 
-Per rimuovere la copia locale:
+Remove the local copy interactively or non-interactively:
 
 ```bash
 harica-client auth delete --environment production
-```
-
-In uno script non interattivo la conferma può essere esplicita:
-
-```bash
 harica-client auth delete --environment production --yes
 ```
 
-La cancellazione locale non revoca la chiave sul portale HARICA; in caso di compromissione
-occorre revocarla anche nel Certificate Manager.
+Deleting the local copy does not revoke the key in HARICA Certificate Manager. Revoke
+the key in the portal if it may have been compromised.
 
-### Esecuzione tramite cron
+### Cron execution
 
-Usa un account di sistema dedicato e non privilegiato. Esempio di crontab:
+Use a dedicated, unprivileged service account. Example crontab:
 
 ```cron
 PATH=/opt/harica-client/.venv/bin:/usr/bin:/bin
 HOME=/home/harica
 HARICA_API_KEY_FILE=/home/harica/.config/harica-client/credentials/production.key
+HARICA_CLIENT_LANGUAGE=en
 
-0 6 * * * /bin/sh -c 'umask 077; exec harica-client list --environment production --status valid --csv /home/harica/exports/certificati-validi.csv --force' >> /home/harica/log/harica-client.log 2>&1
+0 6 * * * /bin/sh -c 'umask 077; exec harica-client list --environment production --status valid --csv /home/harica/exports/valid-certificates.csv --force' >> /home/harica/log/harica-client.log 2>&1
 ```
 
-Il crontab non contiene la chiave. `HOME` viene dichiarata esplicitamente per rendere
-deterministica la configurazione anche nell'ambiente minimale di cron. Crea in anticipo
-le directory di output e log con permessi adatti all'utente del job.
+The crontab contains no secret. An explicit `HOME` makes configuration deterministic in
+cron's minimal environment. Create output and log directories in advance with permissions
+appropriate for the service account.
 
-Non inserire la chiave in `.zshrc`, `.profile`, crontab, argomenti della CLI o file nel
-repository. `HARICA_API_KEY` resta utile per esecuzioni effimere, ma non è il metodo
-raccomandato per la persistenza su server.
+Do not store the key in `.zshrc`, `.profile`, crontab, CLI arguments, or repository files.
+`HARICA_API_KEY` remains useful for ephemeral CI execution but is not recommended for
+persistent server configuration.
 
-## Utilizzo
+## Usage
 
 ```bash
 harica-client version
@@ -156,53 +170,39 @@ harica-client list --status valid --fqdn auth.wifi.example.org
 harica-client list --status valid --friendly-name wifi
 harica-client list --status valid --email pki@example.org
 harica-client list --status revoked --json
-harica-client list --status valid --csv certificati-validi.csv
-harica-client list --status all --csv tutti-i-certificati.csv
+harica-client list --status valid --csv valid-certificates.csv
+harica-client list --status all --csv all-certificates.csv
 harica-client list --status expired --environment staging
-harica-client serial 'NUMERO-SERIALE' --json
-harica-client serial 'NUMERO-SERIALE' --csv certificato.csv
+harica-client serial 'SERIAL-NUMBER' --json
+harica-client serial 'SERIAL-NUMBER' --csv certificate.csv
 ```
 
-### Elenco completo di tutti gli stati
+### Listing every status
 
-Per unire certificati validi, revocati e scaduti in un unico risultato:
+Use `all` to combine valid, revoked, and expired certificates:
 
 ```bash
 harica-client list --status all
 harica-client list --status all --json
-harica-client list --status all --csv tutti-i-certificati.csv --force
+harica-client list --status all --csv all-certificates.csv --force
 ```
 
-HARICA espone un endpoint distinto per ciascuno stato. Di conseguenza, `--status all`
-esegue in sequenza tre richieste: `valid`, `revoked` ed `expired`. Il retry e la gestione
-del rate limit si applicano separatamente a ogni richiesta. Le risposte vengono unite in
-un solo elenco e, quando assente, viene aggiunto a ogni certificato il campo `status`
-corrispondente all'endpoint di origine.
+HARICA exposes one endpoint per status, so `--status all` makes three sequential requests.
+Retry and rate-limit handling apply independently to each request. Responses are merged,
+and a missing `status` field is added from the source endpoint.
 
-### Ricerca per FQDN, friendlyName ed email
+### Filtering by FQDN, friendlyName, and email
 
-Il comando `list` può filtrare localmente i certificati tramite una ricerca parziale e
-case-insensitive. Il filtro FQDN considera i campi FQDN, CN, SAN, DN e, come fallback,
-`friendlyName`:
+`list` performs local, case-insensitive partial matching. The FQDN filter considers FQDN,
+CN, SAN, DN, and `friendlyName` as a fallback:
 
 ```bash
 harica-client list --status valid --fqdn auth.wifi.example.org
-```
-
-Per cercare esclusivamente nel campo `friendlyName`:
-
-```bash
 harica-client list --status valid --friendly-name wifi
-```
-
-Per cercare nei campi email restituiti da HARICA, incluso `userEmail`:
-
-```bash
 harica-client list --status valid --email pki@example.org
 ```
 
-È supportato anche l'alias `--friendlyName`. I filtri possono essere combinati e in tal
-caso devono risultare tutti veri:
+`--friendlyName` is retained as an alias. Filters can be combined and use AND logic:
 
 ```bash
 harica-client list \
@@ -212,66 +212,44 @@ harica-client list \
   --email pki@example.org
 ```
 
-L'esportazione CSV e JSON utilizza gli stessi risultati filtrati:
+JSON and CSV export use the same filtered results. Filtering happens after the single
+HARICA response and does not create one request per certificate.
+
+In every output format, `CN` remains separate from `friendlyName`. If HARICA does not
+provide a separate `commonName`, the client extracts CN from `dN`. All other field names
+and values remain exactly as returned by the API.
+
+### CSV export
+
+`--csv FILE` exports all returned fields using UTF-8 with BOM for Excel compatibility:
 
 ```bash
-harica-client list \
-  --status valid \
-  --fqdn example.org \
-  --csv certificati-example.csv
+harica-client list --status valid --csv export/valid-certificates.csv
 ```
 
-Il filtraggio avviene dopo la singola risposta HARICA e non genera richieste aggiuntive
-per ciascun certificato.
+Lists and nested objects are stored as compact JSON in one cell. To reduce CSV injection
+risk, text beginning with `=`, `+`, `-`, `@`, tab, or carriage return receives a leading
+apostrophe. Use `--json` when completely raw values are required.
 
-In ogni formato di output la colonna o proprietà `CN` è sempre distinta da `friendlyName`.
-Se HARICA non restituisce un campo `commonName` separato, il client estrae il CN dal
-distinguished name contenuto in `dN`. Il campo derivato `CN` viene aggiunto alla tabella,
-al JSON e al CSV; tutti gli altri nomi e valori restano quelli originali restituiti
-dall'API.
+The potentially large `certificate` field is removed from every CLI format. Informational
+fields such as `certificateType` and `certificateValidTo` remain. Library users still
+receive the complete HARICA response.
 
-### Esportazione CSV
+Existing files are not overwritten unless `--force` is supplied. `--json` and `--csv`
+are mutually exclusive.
 
-L'opzione `--csv FILE` esporta tutti i campi restituiti da HARICA:
+Default environments are:
 
-```bash
-harica-client list --status valid --csv export/certificati-validi.csv
-```
-
-Il file usa UTF-8 con BOM, così da essere riconosciuto correttamente anche da Excel.
-Liste e oggetti annidati vengono salvati nella singola cella come JSON compatto. Per
-ridurre il rischio di CSV injection, i testi che iniziano con `=`, `+`, `-`, `@`, tab o
-carriage return ricevono un apostrofo iniziale; per ottenere i valori integralmente grezzi
-resta disponibile `--json`.
-
-Il campo `certificate`, che può contenere l'intero certificato e rendere l'output molto
-pesante, viene escluso da tutti gli output della CLI (tabella, JSON e CSV). Il confronto
-del nome non distingue tra maiuscole e minuscole. Campi informativi come
-`certificateType` e `certificateValidTo` restano presenti. Questa esclusione riguarda
-solo la CLI: usando `HaricaClient` come libreria si continua a ricevere la risposta
-HARICA completa.
-
-Per sicurezza un file esistente non viene sovrascritto. La sovrascrittura deve essere
-richiesta esplicitamente:
-
-```bash
-harica-client list --status valid --csv certificati-validi.csv --force
-```
-
-`--json` e `--csv` sono mutuamente esclusivi.
-
-Gli ambienti predefiniti sono:
-
-| Ambiente | Base URL |
+| Environment | Base URL |
 | --- | --- |
 | production | `https://cm.harica.gr` |
 | staging | `https://cm-stg.harica.gr` |
 | development | `https://cm-dev.harica.gr` |
 
-Per test controllati è disponibile `--base-url`; non usarla in produzione senza aver
-verificato attentamente la destinazione, perché l'API key viene inviata a tale host.
+`--base-url` is available for controlled tests. Do not use it in production without
+carefully verifying the destination because the API key is sent to that host.
 
-## Uso come libreria
+## Library usage
 
 ```python
 import os
@@ -283,34 +261,34 @@ client = HaricaClient(
     retry_policy=RetryPolicy(max_attempts=4, base_delay=1, max_delay=60),
 )
 
-validi = client.list_certificates("valid")
-certificato = client.certificate_by_serial("NUMERO-SERIALE")
+valid = client.list_certificates("valid")
+certificate = client.certificate_by_serial("SERIAL-NUMBER")
 ```
 
-Il valore restituito è il JSON HARICA decodificato, senza imporre uno schema locale che
-potrebbe diventare rapidamente obsoleto.
+The return value is decoded HARICA JSON without a local schema that could quickly become
+outdated.
 
-## Comportamento sul rate limit
+## Rate-limit behavior
 
-Su HTTP 429 il client:
+On HTTP 429 the client:
 
-1. rispetta `Retry-After`, se presente e valido;
-2. altrimenti calcola un backoff esponenziale con jitter;
-3. limita ogni attesa a `max_delay`;
-4. dopo l'ultimo tentativo solleva `HaricaRateLimitError`.
+1. honors a valid `Retry-After` value;
+2. otherwise uses exponential backoff with jitter;
+3. caps each wait at `max_delay`;
+4. raises `HaricaRateLimitError` after the final attempt.
 
-La CLI restituisce exit code `75` quando il rate limit resta attivo. Gli errori ordinari
-restituiscono `1`, mentre gli errori di uso/configurazione restituiscono `2`.
+The CLI exits with code `75` while the rate limit remains active. Ordinary errors return
+`1`; usage and configuration errors return `2`.
 
-## Test
+## Tests
 
-I test usano un server HTTP locale e non contattano HARICA:
+Tests use a simulated HTTP transport and never contact HARICA:
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-## Endpoint implementati
+## Implemented endpoints
 
 ```text
 GET /cm/v1/admin/certificates/list/valid
@@ -319,13 +297,13 @@ GET /cm/v1/admin/certificates/list/expired
 GET /cm/v1/admin/certificates/serial/{serialNumber}
 ```
 
-Riferimenti ufficiali consultati il 17 luglio 2026:
+Official references consulted on July 17, 2026:
 
 - https://guides.harica.gr/docs/Guides/Developer/5.-API-Keys/
 - https://developer.harica.gr/
 
-## Limiti
+## Limitations
 
-Il progetto non implementa emissione, approvazione, revoca o download di certificati.
-Queste operazioni modificano stato e richiedono modelli di richiesta specifici: vanno
-aggiunte solo dopo una verifica puntuale dello Swagger HARICA e con test dedicati.
+The project does not implement certificate issuance, approval, revocation, or download.
+Those operations mutate state and require specific request models; they should only be
+added after reviewing the current HARICA Swagger documentation and adding dedicated tests.

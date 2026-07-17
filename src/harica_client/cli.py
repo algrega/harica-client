@@ -31,6 +31,14 @@ from .errors import (
     HaricaRateLimitError,
     HaricaResponseError,
 )
+from .i18n import (
+    SUPPORTED_LANGUAGES,
+    LanguageSelectionError,
+    localize_argparse_error,
+    resolve_language,
+    tr,
+    using_language,
+)
 
 _FQDN_FIELDS = frozenset(
     {
@@ -60,29 +68,63 @@ _EMAIL_FIELDS = frozenset(
 )
 
 
+class LocalizedArgumentParser(argparse.ArgumentParser):
+    """ArgumentParser con help ed errori controllati dalla lingua della CLI."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        kwargs["add_help"] = False
+        super().__init__(*args, **kwargs)
+        self._positionals.title = tr("positional_arguments")
+        self._optionals.title = tr("options")
+        self.add_argument("-h", "--help", action="help", help=tr("show_help"))
+
+    def format_usage(self) -> str:
+        return super().format_usage().replace("usage: ", f"{tr('usage')}: ", 1)
+
+    def format_help(self) -> str:
+        return super().format_help().replace("usage: ", f"{tr('usage')}: ", 1)
+
+    def error(self, message: str) -> None:
+        self.print_usage(sys.stderr)
+        self.exit(
+            2,
+            f"{self.prog}: {tr('error').casefold()}: "
+            f"{localize_argparse_error(message)}\n",
+        )
+
+
+def _add_language_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--language",
+        choices=SUPPORTED_LANGUAGES,
+        default=argparse.SUPPRESS,
+        help=tr("help_language"),
+    )
+
+
 def _add_connection_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--environment",
         choices=[item.value for item in Environment],
         default=Environment.PRODUCTION.value,
-        help="Ambiente HARICA (default: production)",
+        help=tr("help_environment"),
     )
     parser.add_argument(
         "--base-url",
-        help="Base URL personalizzata, utile per test locali (sovrascrive --environment)",
+        help=tr("help_base_url"),
     )
-    parser.add_argument("--timeout", type=float, default=30.0, help="Timeout HTTP in secondi")
+    parser.add_argument("--timeout", type=float, default=30.0, help=tr("help_timeout"))
     parser.add_argument(
         "--max-attempts",
         type=int,
         default=4,
-        help="Numero totale massimo di tentativi (default: 4)",
+        help=tr("help_max_attempts"),
     )
     parser.add_argument(
         "--api-key-file",
         metavar="PATH",
         type=Path,
-        help="File API key protetto; precede variabili d'ambiente e percorso predefinito",
+        help=tr("help_api_key_file"),
     )
 
 
@@ -91,106 +133,115 @@ def _add_auth_arguments(parser: argparse.ArgumentParser) -> None:
         "--environment",
         choices=[item.value for item in Environment],
         default=Environment.PRODUCTION.value,
-        help="Ambiente HARICA (default: production)",
+        help=tr("help_environment"),
     )
     parser.add_argument(
         "--api-key-file",
         metavar="PATH",
         type=Path,
-        help="Percorso alternativo del file API key",
+        help=tr("help_auth_api_key_file"),
     )
 
 
 def _add_output_arguments(parser: argparse.ArgumentParser) -> None:
     output = parser.add_mutually_exclusive_group()
-    output.add_argument("--json", action="store_true", help="Stampa il JSON integrale")
+    output.add_argument("--json", action="store_true", help=tr("help_json"))
     output.add_argument(
         "--csv",
         metavar="FILE",
         type=Path,
-        help="Esporta tutti i campi in un file CSV UTF-8",
+        help=tr("help_csv"),
     )
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Sovrascrive il file indicato con --csv, se esiste",
+        help=tr("help_force"),
     )
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = LocalizedArgumentParser(
         prog="harica-client",
-        description="Client prudente per le API Certificate Manager di HARICA",
+        description=tr("app_description"),
     )
+    _add_language_argument(parser)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    version_parser = subparsers.add_parser("version", help="Mostra la versione")
+    version_parser = subparsers.add_parser("version", help=tr("help_version"))
+    _add_language_argument(version_parser)
     version_parser.set_defaults(handler=_run_version)
 
-    list_parser = subparsers.add_parser("list", help="Elenca certificati per stato")
+    list_parser = subparsers.add_parser("list", help=tr("help_list"))
+    _add_language_argument(list_parser)
     list_parser.add_argument(
         "--status",
         choices=("valid", "revoked", "expired", "all"),
         default="valid",
-        help="Stato dei certificati; all interroga i tre stati (default: valid)",
+        help=tr("help_status"),
     )
     list_parser.add_argument(
         "--fqdn",
         metavar="VALUE",
-        help="Filtra per FQDN, CN, SAN o DN (ricerca parziale case-insensitive)",
+        help=tr("help_fqdn"),
     )
     list_parser.add_argument(
         "--friendly-name",
         "--friendlyName",
         dest="friendly_name",
         metavar="VALUE",
-        help="Filtra per friendlyName (ricerca parziale case-insensitive)",
+        help=tr("help_friendly_name"),
     )
     list_parser.add_argument(
         "--email",
         metavar="VALUE",
-        help="Filtra per indirizzo email (ricerca parziale case-insensitive)",
+        help=tr("help_email"),
     )
     _add_output_arguments(list_parser)
     _add_connection_arguments(list_parser)
     list_parser.set_defaults(handler=_run_list)
 
-    serial_parser = subparsers.add_parser("serial", help="Cerca un certificato per seriale")
-    serial_parser.add_argument("serial_number", help="Numero seriale del certificato")
+    serial_parser = subparsers.add_parser("serial", help=tr("help_serial"))
+    _add_language_argument(serial_parser)
+    serial_parser.add_argument("serial_number", help=tr("serial_number"))
     _add_output_arguments(serial_parser)
     _add_connection_arguments(serial_parser)
     serial_parser.set_defaults(handler=_run_serial)
 
-    auth_parser = subparsers.add_parser("auth", help="Gestisce l'API key su filesystem")
+    auth_parser = subparsers.add_parser("auth", help=tr("help_auth"))
+    _add_language_argument(auth_parser)
     auth_subparsers = auth_parser.add_subparsers(dest="auth_command", required=True)
 
-    auth_set_parser = auth_subparsers.add_parser("set", help="Salva o ruota una API key")
+    auth_set_parser = auth_subparsers.add_parser("set", help=tr("help_auth_set"))
+    _add_language_argument(auth_set_parser)
     _add_auth_arguments(auth_set_parser)
     auth_set_parser.set_defaults(handler=_run_auth_set)
 
     auth_status_parser = auth_subparsers.add_parser(
-        "status", help="Controlla origine e sicurezza della API key"
+        "status", help=tr("help_auth_status")
     )
+    _add_language_argument(auth_status_parser)
     _add_auth_arguments(auth_status_parser)
     auth_status_parser.set_defaults(handler=_run_auth_status)
 
-    auth_delete_parser = auth_subparsers.add_parser("delete", help="Elimina una API key")
+    auth_delete_parser = auth_subparsers.add_parser("delete", help=tr("help_auth_delete"))
+    _add_language_argument(auth_delete_parser)
     _add_auth_arguments(auth_delete_parser)
     auth_delete_parser.add_argument(
         "--yes",
         action="store_true",
-        help="Conferma la cancellazione senza prompt interattivo",
+        help=tr("help_yes"),
     )
     auth_delete_parser.set_defaults(handler=_run_auth_delete)
 
     auth_migrate_parser = auth_subparsers.add_parser(
-        "migrate", help="Migra una API key dal vecchio percorso harica-safe"
+        "migrate", help=tr("help_auth_migrate")
     )
+    _add_language_argument(auth_migrate_parser)
     auth_migrate_parser.add_argument(
         "--environment",
         choices=[item.value for item in Environment],
         default=Environment.PRODUCTION.value,
-        help="Ambiente HARICA (default: production)",
+        help=tr("help_environment"),
     )
     auth_migrate_parser.set_defaults(handler=_run_auth_migrate)
 
@@ -239,12 +290,12 @@ def _run_auth_set(args: argparse.Namespace) -> int:
         args.environment,
         explicit_path=args.api_key_file,
     )
-    first = getpass.getpass("API key HARICA: ")
-    second = getpass.getpass("Ripetere API key HARICA: ")
+    first = getpass.getpass(tr("api_key_prompt"))
+    second = getpass.getpass(tr("api_key_repeat_prompt"))
     if not hmac.compare_digest(first, second):
-        raise HaricaConfigurationError("Le API key inserite non coincidono")
+        raise HaricaConfigurationError(tr("api_keys_mismatch"))
     written = write_api_key_file(target, first)
-    print(f"API key salvata per {args.environment} in {written}")
+    print(tr("api_key_saved", environment=args.environment, path=written))
     return 0
 
 
@@ -253,15 +304,18 @@ def _run_auth_status(args: argparse.Namespace) -> int:
         args.environment,
         explicit_path=args.api_key_file,
     )
-    print(f"Stato: {'valida' if status.valid else 'non valida'}")
-    print(f"Origine: {status.source}")
+    print(f"{tr('status')}: {tr('valid') if status.valid else tr('invalid')}")
+    print(f"{tr('source')}: {status.source}")
     if status.path is not None:
-        print(f"Percorso: {status.path}")
-        print(f"Permessi: {'validi' if status.valid else 'da correggere'}")
+        print(f"{tr('path')}: {status.path}")
+        print(
+            f"{tr('permissions')}: "
+            f"{tr('permissions_valid') if status.valid else tr('permissions_fix')}"
+        )
     else:
-        print("Percorso: non applicabile")
-        print("Permessi: non applicabile")
-    print(f"Dettaglio: {status.detail}")
+        print(f"{tr('path')}: {tr('not_applicable')}")
+        print(f"{tr('permissions')}: {tr('not_applicable')}")
+    print(f"{tr('detail')}: {status.detail}")
     return 0 if status.valid else 1
 
 
@@ -272,22 +326,27 @@ def _run_auth_delete(args: argparse.Namespace) -> int:
     )
     if not args.yes:
         try:
-            answer = input(f"Eliminare la API key per {args.environment} da {target}? [s/N] ")
+            answer = input(tr("delete_prompt", environment=args.environment, path=target))
         except EOFError as exc:
-            raise HaricaConfigurationError(
-                "Conferma interattiva non disponibile; usare --yes"
-            ) from exc
+            raise HaricaConfigurationError(tr("confirmation_unavailable")) from exc
         if answer.strip().casefold() not in {"s", "si", "sì", "y", "yes"}:
-            print("Operazione annullata.")
+            print(tr("operation_cancelled"))
             return 0
     deleted = delete_api_key_file(target)
-    print(f"API key eliminata per {args.environment} da {deleted}")
+    print(tr("api_key_deleted", environment=args.environment, path=deleted))
     return 0
 
 
 def _run_auth_migrate(args: argparse.Namespace) -> int:
     source, destination = migrate_legacy_api_key(args.environment)
-    print(f"API key migrata per {args.environment} da {source} a {destination}")
+    print(
+        tr(
+            "api_key_migrated",
+            environment=args.environment,
+            source=source,
+            destination=destination,
+        )
+    )
     return 0
 
 
@@ -296,7 +355,13 @@ def _render_or_export(data: Any, args: argparse.Namespace) -> None:
     data = _with_common_name(data)
     if args.csv is not None:
         row_count = _write_csv(data, args.csv, force=args.force)
-        print(f"Esportate {row_count} righe in {args.csv.expanduser().resolve()}")
+        print(
+            tr(
+                "rows_exported",
+                count=row_count,
+                path=args.csv.expanduser().resolve(),
+            )
+        )
         return
     _print_data(data, force_json=args.json)
 
@@ -398,7 +463,7 @@ def _normalized_filter(value: str | None, *, option: str) -> str | None:
         return None
     normalized = value.strip().casefold()
     if not normalized:
-        raise HaricaConfigurationError(f"{option} non può essere vuoto")
+        raise HaricaConfigurationError(tr("empty_filter", option=option))
     return normalized
 
 
@@ -442,7 +507,7 @@ def _print_data(data: Any, *, force_json: bool) -> None:
         return
     rows = _extract_rows(data)
     if not rows:
-        print("Nessun risultato.")
+        print(tr("no_results"))
         return
     if not all(isinstance(row, Mapping) for row in rows):
         print(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True))
@@ -465,15 +530,11 @@ def _extract_rows(data: Any) -> list[Any]:
 def _write_csv(data: Any, destination: Path, *, force: bool = False) -> int:
     rows = _extract_rows(data)
     if not all(isinstance(row, Mapping) for row in rows):
-        raise HaricaConfigurationError(
-            "La risposta HARICA non è convertibile in righe CSV; usare --json"
-        )
+        raise HaricaConfigurationError(tr("csv_not_rows"))
 
     target = destination.expanduser().resolve()
     if target.exists() and not force:
-        raise HaricaConfigurationError(
-            f"Il file CSV esiste già: {target}. Usare --force per sovrascriverlo"
-        )
+        raise HaricaConfigurationError(tr("csv_exists", path=target))
     fieldnames = _csv_fieldnames(rows)
     temporary_path: Path | None = None
 
@@ -500,7 +561,9 @@ def _write_csv(data: Any, destination: Path, *, force: bool = False) -> int:
     except OSError as exc:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
-        raise HaricaConfigurationError(f"Impossibile scrivere il CSV {target}: {exc}") from exc
+        raise HaricaConfigurationError(
+            tr("csv_write_failed", path=target, error=exc)
+        ) from exc
 
     return len(rows)
 
@@ -668,24 +731,33 @@ def _cell(value: Any) -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
+    arguments = list(sys.argv[1:] if argv is None else argv)
     try:
-        return int(args.handler(args))
-    except HaricaRateLimitError as exc:
-        print(f"Errore: {exc}", file=sys.stderr)
-        return 75
-    except HaricaResponseError as exc:
-        print(f"Errore: {exc}", file=sys.stderr)
-        if exc.body_preview:
-            print(f"Anteprima risposta: {exc.body_preview!r}", file=sys.stderr)
-        return 1
-    except HaricaError as exc:
-        print(f"Errore: {exc}", file=sys.stderr)
-        return 1
-    except ValueError as exc:
-        print(f"Errore di configurazione: {exc}", file=sys.stderr)
-        return 2
+        language = resolve_language(arguments)
+    except LanguageSelectionError as exc:
+        with using_language(exc.fallback_language):
+            parser = build_parser()
+            parser.error(tr(exc.message_key, value=exc.value))
+
+    with using_language(language):
+        parser = build_parser()
+        args = parser.parse_args(arguments)
+        try:
+            return int(args.handler(args))
+        except HaricaRateLimitError as exc:
+            print(f"{tr('error')}: {exc}", file=sys.stderr)
+            return 75
+        except HaricaResponseError as exc:
+            print(f"{tr('error')}: {exc}", file=sys.stderr)
+            if exc.body_preview:
+                print(f"{tr('response_preview')}: {exc.body_preview!r}", file=sys.stderr)
+            return 1
+        except HaricaError as exc:
+            print(f"{tr('error')}: {exc}", file=sys.stderr)
+            return 1
+        except ValueError as exc:
+            print(f"{tr('configuration_error')}: {exc}", file=sys.stderr)
+            return 2
 
 
 if __name__ == "__main__":
