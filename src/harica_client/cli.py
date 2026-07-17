@@ -21,7 +21,6 @@ from .credentials import (
     credential_destination,
     delete_api_key_file,
     inspect_credential,
-    migrate_legacy_api_key,
     resolve_api_key,
     write_api_key_file,
 )
@@ -272,18 +271,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     auth_delete_parser.set_defaults(handler=_run_auth_delete)
 
-    auth_migrate_parser = auth_subparsers.add_parser(
-        "migrate", help=tr("help_auth_migrate")
-    )
-    _add_language_argument(auth_migrate_parser)
-    auth_migrate_parser.add_argument(
-        "--environment",
-        choices=[item.value for item in Environment],
-        default=Environment.PRODUCTION.value,
-        help=tr("help_environment"),
-    )
-    auth_migrate_parser.set_defaults(handler=_run_auth_migrate)
-
     return parser
 
 
@@ -399,19 +386,6 @@ def _run_auth_delete(args: argparse.Namespace) -> int:
             return 0
     deleted = delete_api_key_file(target)
     print(tr("api_key_deleted", environment=args.environment, path=deleted))
-    return 0
-
-
-def _run_auth_migrate(args: argparse.Namespace) -> int:
-    source, destination = migrate_legacy_api_key(args.environment)
-    print(
-        tr(
-            "api_key_migrated",
-            environment=args.environment,
-            source=source,
-            destination=destination,
-        )
-    )
     return 0
 
 

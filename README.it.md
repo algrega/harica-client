@@ -131,17 +131,6 @@ La precedenza è:
 
 ### Rotazione e cancellazione
 
-Se la chiave era stata configurata con una versione `harica-safe`, può essere migrata
-senza reinserirla e senza mostrarla:
-
-```bash
-harica-client auth migrate --environment production
-```
-
-In assenza della migrazione, `harica-client` continua temporaneamente a leggere il vecchio
-percorso come fallback. Ogni nuovo `auth set` scrive esclusivamente nel percorso
-`harica-client`.
-
 Per sostituire la chiave, ripeti `auth set`: il nuovo file viene scritto atomicamente.
 
 ```bash

@@ -24,7 +24,6 @@ from harica_client.cli import (
 from harica_client.errors import HaricaConfigurationError
 from harica_client.credentials import (
     default_api_key_path,
-    legacy_default_api_key_path,
     read_api_key_file,
     write_api_key_file,
 )
@@ -36,7 +35,7 @@ class CliTests(unittest.TestCase):
         with redirect_stdout(output):
             code = main(["version"])
         self.assertEqual(code, 0)
-        self.assertEqual(output.getvalue().strip(), "0.11.0")
+        self.assertEqual(output.getvalue().strip(), "0.12.0")
 
     def test_extract_wrapped_rows(self) -> None:
         self.assertEqual(
@@ -416,29 +415,6 @@ class CliTests(unittest.TestCase):
         combined = output.getvalue() + errors.getvalue()
         self.assertEqual(code, 0)
         self.assertIn("Origine: HARICA_API_KEY", combined)
-        self.assertNotIn(secret, combined)
-
-    def test_auth_migrate_moves_legacy_key_without_printing_it(self) -> None:
-        secret = "legacy-secret-not-for-output"
-        output = io.StringIO()
-        errors = io.StringIO()
-        with tempfile.TemporaryDirectory() as directory:
-            environment = {"HOME": directory}
-            legacy = legacy_default_api_key_path("production", environ=environment)
-            destination = default_api_key_path("production", environ=environment)
-            write_api_key_file(legacy, secret)
-            with (
-                patch.dict("os.environ", environment, clear=True),
-                redirect_stdout(output),
-                redirect_stderr(errors),
-            ):
-                code = main(["auth", "migrate", "--environment", "production"])
-
-            self.assertEqual(read_api_key_file(destination), secret)
-            self.assertFalse(legacy.exists())
-
-        combined = output.getvalue() + errors.getvalue()
-        self.assertEqual(code, 0)
         self.assertNotIn(secret, combined)
 
 

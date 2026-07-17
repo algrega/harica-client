@@ -125,16 +125,7 @@ only a path and not the secret. Credential precedence is:
 3. `HARICA_API_KEY_FILE`;
 4. the environment's default file.
 
-### Rotation, migration, and deletion
-
-Migrate a key previously stored by `harica-safe` without entering or displaying it:
-
-```bash
-harica-client auth migrate --environment production
-```
-
-Without migration, `harica-client` temporarily reads the legacy path as a fallback.
-Every new `auth set` writes only to the `harica-client` path.
+### Rotation and deletion
 
 Run `auth set` again to rotate a key. The new file is written atomically:
 

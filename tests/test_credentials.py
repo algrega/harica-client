@@ -12,8 +12,6 @@ from harica_client.credentials import (
     default_api_key_path,
     delete_api_key_file,
     inspect_credential,
-    legacy_default_api_key_path,
-    migrate_legacy_api_key,
     read_api_key_file,
     resolve_api_key,
     write_api_key_file,
@@ -103,35 +101,6 @@ class CredentialTests(unittest.TestCase):
             credential = resolve_api_key("development", environ=cron_environment)
         self.assertEqual(credential.api_key, "cron-secret")
         self.assertEqual(credential.path, default_file)
-
-    def test_legacy_default_is_read_when_new_path_is_missing(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            environment = {"HOME": directory}
-            legacy = legacy_default_api_key_path("production", environ=environment)
-            write_api_key_file(legacy, "legacy-secret")
-            credential = resolve_api_key("production", environ=environment)
-
-        self.assertEqual(credential.api_key, "legacy-secret")
-        self.assertEqual(credential.source, "file legacy harica-safe")
-        self.assertEqual(credential.path, legacy)
-
-    def test_migration_moves_legacy_key_without_changing_value(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            environment = {"HOME": directory}
-            legacy = legacy_default_api_key_path("production", environ=environment)
-            destination = default_api_key_path("production", environ=environment)
-            write_api_key_file(legacy, "legacy-secret")
-
-            source, migrated = migrate_legacy_api_key(
-                "production",
-                environ=environment,
-            )
-
-            self.assertEqual(source, legacy)
-            self.assertEqual(migrated, destination)
-            self.assertFalse(legacy.exists())
-            self.assertEqual(read_api_key_file(destination), "legacy-secret")
-            self.assertFalse(legacy.parent.parent.exists())
 
     def test_set_creates_0700_directory_and_0600_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -64,26 +64,6 @@ def default_api_key_path(
     return _absolute_path(root / "harica-client" / "credentials" / f"{environment}.key")
 
 
-def legacy_default_api_key_path(
-    environment: str,
-    *,
-    environ: Mapping[str, str] | None = None,
-) -> Path:
-    """Percorso usato da harica-safe, mantenuto solo per migrazione."""
-    current = os.environ if environ is None else environ
-    xdg_config_home = current.get("XDG_CONFIG_HOME", "").strip()
-    if xdg_config_home:
-        root = Path(xdg_config_home).expanduser()
-        if not root.is_absolute():
-            raise HaricaConfigurationError(tr("absolute_xdg"))
-    else:
-        configured_home = current.get("HOME", "").strip()
-        root = (Path(configured_home).expanduser() if configured_home else Path.home()) / ".config"
-        if not root.is_absolute():
-            raise HaricaConfigurationError(tr("absolute_home"))
-    return _absolute_path(root / "harica-safe" / "credentials" / f"{environment}.key")
-
-
 def select_credential_location(
     environment: str,
     *,
@@ -102,11 +82,6 @@ def select_credential_location(
             raise HaricaConfigurationError(tr("env_empty", name=API_KEY_FILE_ENV))
         return CredentialLocation(source=API_KEY_FILE_ENV, path=_absolute_path(configured))
     preferred = default_api_key_path(environment, environ=current)
-    if preferred.exists() or preferred.is_symlink():
-        return CredentialLocation(source=tr("default_file"), path=preferred)
-    legacy = legacy_default_api_key_path(environment, environ=current)
-    if legacy.exists() or legacy.is_symlink():
-        return CredentialLocation(source=tr("legacy_file"), path=legacy)
     return CredentialLocation(source=tr("default_file"), path=preferred)
 
 
@@ -134,7 +109,7 @@ def credential_deletion_target(
     explicit_path: Path | str | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> Path:
-    """Seleziona il file nuovo o, se assente, il file legacy da eliminare."""
+    """Seleziona il file di credenziali da eliminare."""
     current = os.environ if environ is None else environ
     if explicit_path is not None or API_KEY_FILE_ENV in current:
         return credential_destination(
@@ -142,38 +117,7 @@ def credential_deletion_target(
             explicit_path=explicit_path,
             environ=current,
         )
-    preferred = default_api_key_path(environment, environ=current)
-    if preferred.exists() or preferred.is_symlink():
-        return preferred
-    legacy = legacy_default_api_key_path(environment, environ=current)
-    if legacy.exists() or legacy.is_symlink():
-        return legacy
-    return preferred
-
-
-def migrate_legacy_api_key(
-    environment: str,
-    *,
-    environ: Mapping[str, str] | None = None,
-) -> tuple[Path, Path]:
-    """Sposta atomicamente una credenziale harica-safe nel nuovo percorso."""
-    current = os.environ if environ is None else environ
-    source = legacy_default_api_key_path(environment, environ=current)
-    destination = default_api_key_path(environment, environ=current)
-    if destination.exists() or destination.is_symlink():
-        raise HaricaConfigurationError(tr("new_credential_exists", path=destination))
-
-    api_key = read_api_key_file(source)
-    write_api_key_file(destination, api_key)
-    try:
-        delete_api_key_file(source)
-    except HaricaConfigurationError as exc:
-        raise HaricaConfigurationError(
-            tr("legacy_copy_cleanup_failed", destination=destination, error=exc)
-        ) from exc
-
-    _remove_empty_legacy_directories(source.parent)
-    return source, destination
+    return default_api_key_path(environment, environ=current)
 
 
 def resolve_api_key(
@@ -362,12 +306,3 @@ def _validate_secret_directory_metadata(path: Path) -> None:
         raise HaricaConfigurationError(
             tr("credential_dir_permissions", path=path, mode=mode)
         )
-
-
-def _remove_empty_legacy_directories(credentials_directory: Path) -> None:
-    """Rimuove solo le directory legacy note e già vuote."""
-    for directory in (credentials_directory, credentials_directory.parent):
-        try:
-            directory.rmdir()
-        except OSError:
-            break

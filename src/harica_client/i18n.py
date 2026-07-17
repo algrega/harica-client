@@ -82,7 +82,6 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "help_auth_status": "Controlla origine e sicurezza della API key",
         "help_auth_delete": "Elimina una API key",
         "help_yes": "Conferma la cancellazione senza prompt interattivo",
-        "help_auth_migrate": "Migra una API key dal vecchio percorso harica-safe",
         "language_missing": "l'opzione --language richiede un valore: it oppure en",
         "language_invalid": "lingua non valida: {value!r} (valori ammessi: it, en)",
         "arg_required": "sono richiesti i seguenti argomenti: {arguments}",
@@ -108,7 +107,6 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "confirmation_unavailable": "Conferma interattiva non disponibile; usare --yes",
         "operation_cancelled": "Operazione annullata.",
         "api_key_deleted": "API key eliminata per {environment} da {path}",
-        "api_key_migrated": "API key migrata per {environment} da {source} a {destination}",
         "rows_exported": "Esportate {count} righe in {path}",
         "empty_filter": "{option} non può essere vuoto",
         "no_results": "Nessun risultato.",
@@ -146,13 +144,7 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "absolute_home": "HOME deve essere un percorso assoluto",
         "env_empty": "{name} è definita ma vuota",
         "default_file": "file predefinito",
-        "legacy_file": "file legacy harica-safe",
         "configuration": "configurazione",
-        "new_credential_exists": "La credenziale harica-client esiste già: {path}",
-        "legacy_copy_cleanup_failed": (
-            "Credenziale copiata in {destination}, ma il file legacy non è stato "
-            "eliminato: {error}"
-        ),
         "environment_variable_set": "variabile d'ambiente valorizzata",
         "secure_file_detail": "file regolare, proprietario corretto e permessi sicuri",
         "api_key_read_failed": "Impossibile leggere il file API key {path}: {error}",
@@ -247,7 +239,6 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "help_auth_status": "Check API key source and security",
         "help_auth_delete": "Delete an API key",
         "help_yes": "Confirm deletion without an interactive prompt",
-        "help_auth_migrate": "Migrate an API key from the old harica-safe path",
         "language_missing": "option --language requires a value: it or en",
         "language_invalid": "invalid language: {value!r} (allowed values: it, en)",
         "arg_required": "the following arguments are required: {arguments}",
@@ -273,7 +264,6 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "confirmation_unavailable": "Interactive confirmation is unavailable; use --yes",
         "operation_cancelled": "Operation cancelled.",
         "api_key_deleted": "API key deleted for {environment} from {path}",
-        "api_key_migrated": "API key migrated for {environment} from {source} to {destination}",
         "rows_exported": "Exported {count} rows to {path}",
         "empty_filter": "{option} cannot be empty",
         "no_results": "No results.",
@@ -305,13 +295,7 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "absolute_home": "HOME must be an absolute path",
         "env_empty": "{name} is set but empty",
         "default_file": "default file",
-        "legacy_file": "legacy harica-safe file",
         "configuration": "configuration",
-        "new_credential_exists": "The harica-client credential already exists: {path}",
-        "legacy_copy_cleanup_failed": (
-            "Credential copied to {destination}, but the legacy file could not be "
-            "deleted: {error}"
-        ),
         "environment_variable_set": "environment variable is set",
         "secure_file_detail": "regular file, correct owner, and secure permissions",
         "api_key_read_failed": "Unable to read API key file {path}: {error}",

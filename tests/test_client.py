@@ -85,7 +85,7 @@ class HaricaClientTests(unittest.TestCase):
         )
         self.assertEqual(server.requests[0]["api_key"], "secret")
         self.assertEqual(server.requests[0]["accept"], "application/json")
-        self.assertEqual(server.requests[0]["user_agent"], "harica-client/0.11.0")
+        self.assertEqual(server.requests[0]["user_agent"], "harica-client/0.12.0")
 
     def test_all_lists_and_combines_each_status(self) -> None:
         responses = [
