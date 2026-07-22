@@ -26,6 +26,7 @@ rate limiting.
 - certificate lookup by serial number;
 - local filtering by FQDN, `friendlyName`, and email address;
 - retries for `429`, `502`, `503`, and `504` with exponential backoff and jitter;
+- HTTPS enforcement and fail-closed handling of authenticated redirects;
 - support for `Retry-After` as seconds or an HTTP date;
 - distinct errors for authentication, rate limiting, networking, HTTP, and non-JSON responses;
 - table or JSON output and CSV export;
@@ -256,8 +257,10 @@ Default environments are:
 | staging | `https://cm-stg.harica.gr` |
 | development | `https://cm-dev.harica.gr` |
 
-`--base-url` is available for controlled tests. Do not use it in production without
-carefully verifying the destination because the API key is sent to that host.
+`--base-url` is available for controlled tests. HTTPS is mandatory except for loopback
+addresses (`localhost`, `127.0.0.0/8`, and `::1`). Authenticated redirects are never
+followed. Do not use a custom HTTPS destination without verifying it, because the API
+key is sent to that host.
 
 ## Library usage
 

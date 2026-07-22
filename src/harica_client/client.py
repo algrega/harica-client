@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import random
 import socket
@@ -12,8 +13,8 @@ from email.utils import parsedate_to_datetime
 from enum import Enum
 from typing import Any, Callable, Mapping
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlencode
-from urllib.request import Request, urlopen
+from urllib.parse import SplitResult, quote, urlencode, urlsplit, urlunsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from . import __version__
 from .errors import (
@@ -41,6 +42,21 @@ BASE_URLS: dict[Environment, str] = {
     Environment.STAGING: "https://cm-stg.harica.gr",
     Environment.DEVELOPMENT: "https://cm-dev.harica.gr",
 }
+
+_REDACTED = "[REDACTED]"
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    """Impedisce di inoltrare header autenticati durante redirect HTTP."""
+
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        return None
+
+
+def _open_without_redirects(request: Request, *, timeout: float) -> Any:
+    """Apre una richiesta con redirect disabilitati in modo fail-closed."""
+    return build_opener(_NoRedirectHandler()).open(request, timeout=timeout)
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,13 +104,11 @@ class HaricaClient:
                 tr("environment_invalid", environment=environment, allowed=allowed)
             ) from exc
 
-        resolved_url = base_url or BASE_URLS[selected_environment]
-        if not resolved_url.startswith(("https://", "http://")):
-            raise HaricaConfigurationError(tr("base_url_scheme"))
+        resolved_url = _validate_base_url(base_url or BASE_URLS[selected_environment])
 
         self._api_key = api_key.strip()
         self.environment = selected_environment
-        self.base_url = resolved_url.rstrip("/")
+        self.base_url = resolved_url
         self.timeout = timeout
         self.retry_policy = retry_policy or RetryPolicy()
         self._sleep = sleep
@@ -166,7 +180,7 @@ class HaricaClient:
 
         last_network_error: BaseException | None = None
         for attempt in range(1, self.retry_policy.max_attempts + 1):
-            request = Request(
+            request = Request(  # noqa: S310 - base URL validata da _validate_base_url
                 url,
                 method="GET",
                 headers={
@@ -176,12 +190,12 @@ class HaricaClient:
                 },
             )
             try:
-                with urlopen(request, timeout=self.timeout) as response:
-                    body = response.read().decode("utf-8", errors="replace")
+                with _open_without_redirects(request, timeout=self.timeout) as response:
+                    body = self._redact(response.read().decode("utf-8", errors="replace"))
                     return self._decode_json(body, status_code=response.status)
             except HTTPError as exc:
                 try:
-                    body = exc.read().decode("utf-8", errors="replace")
+                    body = self._redact(exc.read().decode("utf-8", errors="replace"))
                     headers = exc.headers
                     request_id = headers.get("X-Request-ID") or headers.get("Request-ID")
                     retry_after = self._parse_retry_after(headers.get("Retry-After"))
@@ -206,12 +220,18 @@ class HaricaClient:
                 if attempt < self.retry_policy.max_attempts:
                     self._sleep(self._delay(attempt, retry_after=None))
                     continue
-                reason = getattr(exc, "reason", exc)
+                reason = self._redact(str(getattr(exc, "reason", exc)))
                 raise HaricaNetworkError(
                     tr("network_failed_attempts", attempts=attempt, reason=reason)
                 ) from exc
 
-        raise HaricaNetworkError(tr("network_failed", reason=last_network_error))
+        raise HaricaNetworkError(
+            tr("network_failed", reason=self._redact(str(last_network_error)))
+        )
+
+    def _redact(self, value: str) -> str:
+        """Oscura sempre la chiave prima di restituire o conservare testo remoto."""
+        return value.replace(self._api_key, _REDACTED)
 
     def _delay(self, attempt: int, *, retry_after: float | None) -> float:
         if retry_after is not None:
@@ -286,3 +306,46 @@ class HaricaClient:
             body=body[:1000],
             request_id=request_id,
         )
+
+
+def _validate_base_url(value: str) -> str:
+    """Convalida e normalizza una base URL senza indebolire TLS."""
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except (TypeError, ValueError) as exc:
+        raise HaricaConfigurationError(tr("base_url_invalid")) from exc
+
+    scheme = parsed.scheme.casefold()
+    if scheme not in {"https", "http"}:
+        raise HaricaConfigurationError(tr("base_url_scheme"))
+    if not parsed.hostname:
+        raise HaricaConfigurationError(tr("base_url_host"))
+    if parsed.username is not None or parsed.password is not None:
+        raise HaricaConfigurationError(tr("base_url_userinfo"))
+    if parsed.query or parsed.fragment:
+        raise HaricaConfigurationError(tr("base_url_components"))
+    if scheme == "http" and not _is_loopback_host(parsed.hostname):
+        raise HaricaConfigurationError(tr("base_url_https"))
+
+    hostname = parsed.hostname
+    if ":" in hostname and not hostname.startswith("["):
+        hostname = f"[{hostname}]"
+    netloc = hostname if port is None else f"{hostname}:{port}"
+    normalized = SplitResult(
+        scheme=scheme,
+        netloc=netloc,
+        path=parsed.path.rstrip("/"),
+        query="",
+        fragment="",
+    )
+    return urlunsplit(normalized)
+
+
+def _is_loopback_host(hostname: str) -> bool:
+    if hostname.casefold() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False

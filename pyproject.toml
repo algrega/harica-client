@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=83.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "harica-client"
-version = "0.12.0"
+version = "0.12.1"
 description = "Cautious CLI client for the HARICA Certificate Manager APIs"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -122,7 +122,12 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "environment_invalid": (
             "Ambiente HARICA non valido: {environment!r}. Valori ammessi: {allowed}"
         ),
-        "base_url_scheme": "La base URL deve iniziare con http:// o https://",
+        "base_url_scheme": "La base URL deve usare lo schema https:// o http:// locale",
+        "base_url_invalid": "La base URL non è valida",
+        "base_url_host": "La base URL deve contenere un host",
+        "base_url_userinfo": "La base URL non può contenere credenziali",
+        "base_url_components": "La base URL non può contenere query o fragment",
+        "base_url_https": "La base URL deve usare HTTPS; HTTP è consentito solo su loopback",
         "status_invalid": "Stato non valido. Valori ammessi: valid, revoked, expired, all",
         "list_format_unexpected": (
             "HARICA ha restituito un formato inatteso durante l'elenco dei certificati"
@@ -277,7 +282,12 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "environment_invalid": (
             "Invalid HARICA environment: {environment!r}. Allowed values: {allowed}"
         ),
-        "base_url_scheme": "Base URL must start with http:// or https://",
+        "base_url_scheme": "Base URL must use https:// or local http://",
+        "base_url_invalid": "Base URL is invalid",
+        "base_url_host": "Base URL must include a host",
+        "base_url_userinfo": "Base URL cannot include credentials",
+        "base_url_components": "Base URL cannot include a query or fragment",
+        "base_url_https": "Base URL must use HTTPS; HTTP is allowed only on loopback",
         "status_invalid": "Invalid status. Allowed values: valid, revoked, expired, all",
         "list_format_unexpected": "HARICA returned an unexpected format while listing certificates",
         "serial_empty": "Serial number cannot be empty",

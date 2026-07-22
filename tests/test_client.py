@@ -4,6 +4,8 @@ import io
 import json
 import unittest
 from collections import deque
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
 from typing import Any
 from unittest.mock import patch
 from urllib.error import HTTPError
@@ -13,6 +15,7 @@ from harica_client import (
     HaricaAuthError,
     HaricaClient,
     HaricaConfigurationError,
+    HaricaHTTPError,
     HaricaRateLimitError,
     HaricaResponseError,
     RetryPolicy,
@@ -40,7 +43,10 @@ class _ScenarioTransport:
         self.responses = deque(responses)
         self.requests: list[dict[str, str]] = []
         self.url = "https://mock.harica.invalid"
-        self._patcher = patch("harica_client.client.urlopen", side_effect=self._open)
+        self._patcher = patch(
+            "harica_client.client._open_without_redirects",
+            side_effect=self._open,
+        )
 
     def _open(self, request: Any, *, timeout: float) -> _FakeResponse:
         del timeout
@@ -85,7 +91,7 @@ class HaricaClientTests(unittest.TestCase):
         )
         self.assertEqual(server.requests[0]["api_key"], "secret")
         self.assertEqual(server.requests[0]["accept"], "application/json")
-        self.assertEqual(server.requests[0]["user_agent"], "harica-client/0.12.0")
+        self.assertEqual(server.requests[0]["user_agent"], "harica-client/0.12.1")
 
     def test_all_lists_and_combines_each_status(self) -> None:
         responses = [
@@ -177,6 +183,108 @@ class HaricaClientTests(unittest.TestCase):
                 client.list_certificates()
 
         self.assertEqual(caught.exception.body_preview, "not-json")
+
+    def test_remote_text_is_redacted_before_errors_are_exposed(self) -> None:
+        secret = "FAKE-ASSESSMENT-KEY-DO-NOT-LOG"
+        responses = [
+            (403, {}, {"message": f"reflected {secret}"}),
+            (200, {}, f"invalid response containing {secret}".encode()),
+        ]
+        with _ScenarioTransport(responses) as server:
+            client = HaricaClient(secret, base_url=server.url)
+            with self.assertRaises(HaricaAuthError) as auth_error:
+                client.list_certificates()
+            with self.assertRaises(HaricaResponseError) as response_error:
+                client.list_certificates()
+
+        self.assertNotIn(secret, str(auth_error.exception))
+        self.assertNotIn(secret, auth_error.exception.body)
+        self.assertIn("[REDACTED]", str(auth_error.exception))
+        self.assertNotIn(secret, response_error.exception.body_preview)
+        self.assertIn("[REDACTED]", response_error.exception.body_preview)
+
+    def test_base_url_requires_https_except_for_loopback(self) -> None:
+        with self.assertRaises(HaricaConfigurationError):
+            HaricaClient("secret", base_url="http://example.org")
+
+        self.assertEqual(
+            HaricaClient("secret", base_url="http://127.0.0.1:8080/").base_url,
+            "http://127.0.0.1:8080",
+        )
+        self.assertEqual(
+            HaricaClient("secret", base_url="http://[::1]:8080/").base_url,
+            "http://[::1]:8080",
+        )
+
+    def test_base_url_rejects_unsafe_or_ambiguous_components(self) -> None:
+        invalid_urls = (
+            "https:///missing-host",
+            "https://user:password@example.org",
+            "https://example.org?target=other",
+            "https://example.org#fragment",
+            "https://example.org:not-a-port",
+        )
+        for value in invalid_urls:
+            with self.subTest(value=value), self.assertRaises(HaricaConfigurationError):
+                HaricaClient("secret", base_url=value)
+
+    def test_redirects_never_forward_the_api_key(self) -> None:
+        secret = "FAKE-REDIRECT-ASSESSMENT-KEY"
+
+        for status_code in (301, 302, 303, 307, 308):
+            received: list[str | None] = []
+
+            class TargetHandler(BaseHTTPRequestHandler):
+                def do_GET(self) -> None:
+                    received.append(self.headers.get("X-API-Key"))
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(b"{}")
+
+                def log_message(self, *_args: object) -> None:
+                    pass
+
+            class RedirectHandler(BaseHTTPRequestHandler):
+                target_url = ""
+
+                def do_GET(self) -> None:
+                    self.send_response(status_code)
+                    self.send_header("Location", self.target_url)
+                    self.end_headers()
+
+                def log_message(self, *_args: object) -> None:
+                    pass
+
+            target = ThreadingHTTPServer(("127.0.0.1", 0), TargetHandler)
+            source = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+            RedirectHandler.target_url = (
+                f"http://127.0.0.1:{target.server_port}/capture"
+            )
+            threads = [
+                Thread(target=server.serve_forever, daemon=True)
+                for server in (target, source)
+            ]
+            for thread in threads:
+                thread.start()
+            try:
+                client = HaricaClient(
+                    secret,
+                    base_url=f"http://127.0.0.1:{source.server_port}",
+                    retry_policy=RetryPolicy(max_attempts=1),
+                )
+                with self.subTest(status_code=status_code), self.assertRaises(
+                    HaricaHTTPError
+                ) as caught:
+                    client.list_certificates()
+                self.assertEqual(caught.exception.status_code, status_code)
+                self.assertEqual(received, [])
+                self.assertNotIn(secret, str(caught.exception))
+            finally:
+                source.shutdown()
+                target.shutdown()
+                source.server_close()
+                target.server_close()
 
     def test_api_key_is_required(self) -> None:
         with self.assertRaises(HaricaConfigurationError):

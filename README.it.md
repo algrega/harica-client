@@ -26,6 +26,7 @@ rate limit HTTP 429.
 - ricerca di un certificato per numero seriale;
 - ricerca locale per FQDN, `friendlyName` e indirizzo email;
 - retry di `429`, `502`, `503` e `504` con backoff esponenziale e jitter;
+- HTTPS obbligatorio e gestione fail-closed dei redirect autenticati;
 - supporto a `Retry-After` sia in secondi sia come data HTTP;
 - errori distinti per autenticazione, rate limit, rete, HTTP e risposta non JSON;
 - output tabellare o JSON ed esportazione CSV;
@@ -301,8 +302,10 @@ Gli ambienti predefiniti sono:
 | staging | `https://cm-stg.harica.gr` |
 | development | `https://cm-dev.harica.gr` |
 
-Per test controllati è disponibile `--base-url`; non usarla in produzione senza aver
-verificato attentamente la destinazione, perché l'API key viene inviata a tale host.
+Per test controllati è disponibile `--base-url`. HTTPS è obbligatorio salvo indirizzi
+loopback (`localhost`, `127.0.0.0/8` e `::1`) e i redirect autenticati non vengono mai
+seguiti. Non usare una destinazione HTTPS personalizzata senza averla verificata,
+perché l'API key viene inviata a tale host.
 
 ## Uso come libreria
 
