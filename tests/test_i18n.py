@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from harica_client import HaricaClient
+from harica_client.cache import write_cache
 from harica_client.cli import _render_or_export, main
 from harica_client.credentials import read_api_key_file, write_api_key_file
 from harica_client.errors import HaricaConfigurationError
@@ -151,10 +152,55 @@ class InternationalizationTests(unittest.TestCase):
             ["list", "--language", "en", "--help"],
             ["auth", "--language", "en", "status", "--help"],
             ["auth", "status", "--language", "en", "--help"],
+            ["cache", "--language", "en", "status", "--help"],
+            ["cache", "status", "--language", "en", "--help"],
         )
         for arguments in cases:
             with self.subTest(arguments=arguments):
                 self.assertIn("Show this help message", self._help(list(arguments)))
+
+    def test_cache_status_and_confirmation_are_localized_in_english(self) -> None:
+        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "private" / "production.json"
+            write_cache(
+                target,
+                environment="production",
+                base_url="https://cm.harica.gr",
+                certificates=[{"serial": "01", "status": "valid"}],
+            )
+            with (
+                patch.dict("os.environ", {"HOME": directory}, clear=True),
+                patch("builtins.input", return_value="yes") as input_mock,
+                redirect_stdout(output),
+                redirect_stderr(io.StringIO()),
+            ):
+                status_code = main(
+                    [
+                        "cache",
+                        "status",
+                        "--language",
+                        "en",
+                        "--cache-file",
+                        str(target),
+                    ]
+                )
+                delete_code = main(
+                    [
+                        "cache",
+                        "delete",
+                        "--language",
+                        "en",
+                        "--cache-file",
+                        str(target),
+                    ]
+                )
+
+        self.assertEqual((status_code, delete_code), (0, 0))
+        self.assertIn("Cache environment: production", output.getvalue())
+        self.assertIn("Cache deleted", output.getvalue())
+        self.assertIn("Delete the cache", input_mock.call_args.args[0])
+        self.assertIn("[y/N]", input_mock.call_args.args[0])
 
     def test_last_flag_wins_and_flag_precedes_environment(self) -> None:
         rendered = self._help(

@@ -8,12 +8,14 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+from harica_client.cache import default_cache_path, write_cache
 from harica_client.cli import (
     _client_from_args,
     _extract_rows,
     _filter_certificates,
+    _filter_certificates_by_status,
     _print_table,
     _render_or_export,
     _terminal_text,
@@ -36,7 +38,7 @@ class CliTests(unittest.TestCase):
         with redirect_stdout(output):
             code = main(["version"])
         self.assertEqual(code, 0)
-        self.assertEqual(output.getvalue().strip(), "0.12.2")
+        self.assertEqual(output.getvalue().strip(), "0.13.0")
 
     def test_extract_wrapped_rows(self) -> None:
         self.assertEqual(
@@ -288,6 +290,18 @@ class CliTests(unittest.TestCase):
         args = build_parser().parse_args(["list", "--status", "all"])
         self.assertEqual(args.status, "all")
 
+    def test_cached_status_filter_is_local_and_case_insensitive(self) -> None:
+        data = [
+            {"serial": "01", "status": "Valid"},
+            {"serial": "02", "status": "revoked"},
+            {"serial": "03", "status": "expired"},
+        ]
+        self.assertEqual(
+            _filter_certificates_by_status(data, "valid"),
+            [data[0]],
+        )
+        self.assertEqual(_filter_certificates_by_status(data, "all"), data)
+
     def test_all_list_filters_use_and_logic(self) -> None:
         data = [
             {
@@ -503,6 +517,223 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("Origine: HARICA_API_KEY", combined)
         self.assertNotIn(secret, combined)
+
+    def test_list_from_cache_filters_without_api_key_or_network(self) -> None:
+        rows = [
+            {
+                "serial": "01",
+                "status": "valid",
+                "friendlyName": "Production Portal",
+                "dN": "C=IT,CN=portal.example.org",
+                "userEmail": "pki@example.org",
+            },
+            {
+                "serial": "02",
+                "status": "revoked",
+                "friendlyName": "Old Portal",
+                "dN": "C=IT,CN=old.example.org",
+                "userEmail": "old@example.org",
+            },
+        ]
+        output = io.StringIO()
+        errors = io.StringIO()
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "private" / "production.json"
+            write_cache(
+                target,
+                environment="production",
+                base_url="https://cm.harica.gr",
+                certificates=rows,
+            )
+            with (
+                patch.dict("os.environ", {"HOME": directory}, clear=True),
+                patch(
+                    "harica_client.cli._client_from_args",
+                    side_effect=AssertionError("network must not be used"),
+                ) as client_factory,
+                redirect_stdout(output),
+                redirect_stderr(errors),
+            ):
+                code = main(
+                    [
+                        "list",
+                        "--from-cache",
+                        "--cache-file",
+                        str(target),
+                        "--status",
+                        "valid",
+                        "--fqdn",
+                        "portal.example.org",
+                        "--friendly-name",
+                        "production",
+                        "--email",
+                        "pki@example.org",
+                        "--json",
+                    ]
+                )
+
+        exported = json.loads(output.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual(len(exported), 1)
+        self.assertEqual(exported[0]["serial"], "01")
+        self.assertEqual(exported[0]["CN"], "portal.example.org")
+        self.assertEqual(errors.getvalue(), "")
+        client_factory.assert_not_called()
+
+    def test_clean_cron_environment_exports_default_cache_to_csv(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {
+                "HOME": directory,
+                "PATH": "/usr/bin:/bin",
+                "HARICA_CLIENT_LANGUAGE": "en",
+            }
+            cache_path = default_cache_path("production", environ=environment)
+            write_cache(
+                cache_path,
+                environment="production",
+                base_url="https://cm.harica.gr",
+                certificates=[
+                    {
+                        "serial": "01",
+                        "status": "valid",
+                        "dN": "C=IT,CN=cron.example.org",
+                    }
+                ],
+            )
+            csv_path = Path(directory) / "exports" / "certificates.csv"
+            with (
+                patch.dict("os.environ", environment, clear=True),
+                patch("harica_client.cli._client_from_args") as client_factory,
+                redirect_stdout(io.StringIO()),
+                redirect_stderr(io.StringIO()),
+            ):
+                code = main(
+                    [
+                        "list",
+                        "--from-cache",
+                        "--status",
+                        "valid",
+                        "--csv",
+                        str(csv_path),
+                    ]
+                )
+            with csv_path.open(encoding="utf-8-sig", newline="") as stream:
+                row = next(csv.DictReader(stream))
+
+        self.assertEqual(code, 0)
+        self.assertEqual(row["CN"], "cron.example.org")
+        client_factory.assert_not_called()
+
+    def test_list_cache_options_require_from_cache(self) -> None:
+        for arguments in (
+            ["list", "--cache-file", "/tmp/cache.json"],
+            ["list", "--max-cache-age", "24"],
+        ):
+            with self.subTest(arguments=arguments):
+                with (
+                    patch(
+                        "harica_client.cli._client_from_args",
+                        side_effect=AssertionError("client must not be created"),
+                    ),
+                    redirect_stdout(io.StringIO()),
+                    redirect_stderr(io.StringIO()),
+                ):
+                    self.assertEqual(main(arguments), 1)
+
+    def test_missing_cache_never_falls_back_to_network(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "missing.json"
+            with (
+                patch(
+                    "harica_client.cli._client_from_args",
+                    side_effect=AssertionError("network fallback is forbidden"),
+                ) as client_factory,
+                redirect_stdout(io.StringIO()),
+                redirect_stderr(io.StringIO()),
+            ):
+                code = main(
+                    ["list", "--from-cache", "--cache-file", str(missing)]
+                )
+        self.assertEqual(code, 1)
+        client_factory.assert_not_called()
+
+    def test_cache_refresh_saves_complete_sanitized_snapshot(self) -> None:
+        secret = "api-key-must-not-be-cached"
+        client = Mock()
+        client.base_url = "https://cm.harica.gr"
+        client.list_certificates.return_value = [
+            {
+                "serial": "01",
+                "status": "valid",
+                "certificate": "PEM-ROOT",
+                "nested": {"certificate": "PEM-NESTED", "keep": True},
+            }
+        ]
+        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "private" / "production.json"
+            with (
+                patch.dict("os.environ", {"HARICA_API_KEY": secret}, clear=True),
+                patch("harica_client.cli._client_from_args", return_value=client),
+                redirect_stdout(output),
+                redirect_stderr(io.StringIO()),
+            ):
+                code = main(
+                    ["cache", "refresh", "--cache-file", str(target)]
+                )
+            payload = json.loads(target.read_text(encoding="utf-8"))
+
+        self.assertEqual(code, 0)
+        client.list_certificates.assert_called_once_with("all")
+        self.assertEqual(payload["statuses"], ["valid", "revoked", "expired"])
+        self.assertNotIn("certificate", payload["certificates"][0])
+        self.assertNotIn("certificate", payload["certificates"][0]["nested"])
+        self.assertNotIn(secret, json.dumps(payload))
+        self.assertIn("Cache aggiornata", output.getvalue())
+
+    def test_cache_refresh_custom_url_requires_explicit_file(self) -> None:
+        with (
+            patch("harica_client.cli._client_from_args") as client_factory,
+            redirect_stdout(io.StringIO()),
+            redirect_stderr(io.StringIO()),
+        ):
+            code = main(
+                ["cache", "refresh", "--base-url", "https://cache.example.org"]
+            )
+        self.assertEqual(code, 1)
+        client_factory.assert_not_called()
+
+    def test_cache_status_and_delete_do_not_use_network(self) -> None:
+        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "private" / "production.json"
+            write_cache(
+                target,
+                environment="production",
+                base_url="https://cm.harica.gr",
+                certificates=[{"serial": "01", "status": "valid"}],
+            )
+            with (
+                patch("harica_client.cli._client_from_args") as client_factory,
+                redirect_stdout(output),
+                redirect_stderr(io.StringIO()),
+            ):
+                status_code = main(
+                    ["cache", "status", "--cache-file", str(target)]
+                )
+                delete_code = main(
+                    ["cache", "delete", "--cache-file", str(target), "--yes"]
+                )
+                missing_status_code = main(
+                    ["cache", "status", "--cache-file", str(target)]
+                )
+
+        self.assertEqual((status_code, delete_code, missing_status_code), (0, 0, 1))
+        self.assertIn("Certificati: 1", output.getvalue())
+        self.assertIn("Cache eliminata", output.getvalue())
+        self.assertIn("Stato: non valida", output.getvalue())
+        self.assertFalse(target.exists())
+        client_factory.assert_not_called()
 
 
 if __name__ == "__main__":

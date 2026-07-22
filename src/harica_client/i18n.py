@@ -69,9 +69,16 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "help_json": "Stampa il JSON integrale",
         "help_csv": "Esporta tutti i campi in un file CSV UTF-8",
         "help_force": "Sovrascrive il file indicato con --csv, se esiste",
+        "help_cache": "Gestisce la cache JSON locale dei certificati",
+        "help_cache_refresh": "Aggiorna la cache interrogando tutti gli stati HARICA",
+        "help_cache_status": "Mostra validità, origine, età e contenuto della cache",
+        "help_cache_delete": "Elimina la cache locale",
+        "help_cache_file": "Percorso alternativo del file cache JSON",
+        "help_from_cache": "Legge e filtra la cache locale senza contattare HARICA",
+        "help_max_cache_age": "Età massima accettata della cache, in ore",
         "help_version": "Mostra la versione",
         "help_list": "Elenca certificati per stato",
-        "help_status": "Stato dei certificati; all interroga i tre stati (default: valid)",
+        "help_status": "Stato dei certificati; all include i tre stati (default: valid)",
         "help_fqdn": "Filtra per FQDN, CN, SAN o DN (ricerca parziale case-insensitive)",
         "help_friendly_name": "Filtra per friendlyName (ricerca parziale case-insensitive)",
         "help_email": "Filtra per indirizzo email (ricerca parziale case-insensitive)",
@@ -107,6 +114,74 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "confirmation_unavailable": "Conferma interattiva non disponibile; usare --yes",
         "operation_cancelled": "Operazione annullata.",
         "api_key_deleted": "API key eliminata per {environment} da {path}",
+        "cache_saved": (
+            "Cache aggiornata per {environment}: {count} certificati in {path}"
+        ),
+        "cache_deleted": "Cache eliminata per {environment} da {path}",
+        "cache_delete_prompt": (
+            "Eliminare la cache per {environment} da {path}? [s/N] "
+        ),
+        "cache_environment": "Ambiente cache",
+        "cache_base_url": "Origine HARICA",
+        "cache_created_at": "Creata il",
+        "cache_age_hours": "Età (ore)",
+        "cache_certificates": "Certificati",
+        "cache_file_requires_from_cache": (
+            "--cache-file con list richiede --from-cache"
+        ),
+        "cache_age_requires_from_cache": (
+            "--max-cache-age con list richiede --from-cache"
+        ),
+        "cache_custom_url_requires_file": (
+            "cache refresh con --base-url richiede --cache-file esplicito"
+        ),
+        "cache_absolute_xdg": "XDG_CACHE_HOME deve essere un percorso assoluto",
+        "cache_absolute_home": "HOME deve produrre un percorso cache assoluto",
+        "cache_not_serializable": "I certificati non sono serializzabili in JSON: {error}",
+        "cache_response_invalid": (
+            "La risposta HARICA non è utilizzabile per creare la cache"
+        ),
+        "cache_write_failed": "Impossibile scrivere la cache {path}: {error}",
+        "cache_read_failed": "Impossibile leggere la cache {path}: {error}",
+        "cache_delete_failed": "Impossibile eliminare la cache {path}: {error}",
+        "cache_missing": "File cache non trovato: {path}",
+        "cache_empty": "Il file cache è vuoto: {path}",
+        "cache_invalid_json": "Il file cache non contiene JSON valido: {path}",
+        "cache_invalid_structure": "Struttura della cache non valida: {path}",
+        "cache_schema_unsupported": (
+            "Versione schema cache non supportata: {actual!r}; attesa {expected}"
+        ),
+        "cache_invalid_timestamp": "Timestamp della cache non valido: {path}",
+        "cache_timestamp_future": "Il timestamp della cache è nel futuro: {path}",
+        "cache_datetime_timezone": "Il timestamp della cache deve includere il fuso orario",
+        "cache_incomplete_statuses": (
+            "La cache non contiene tutti gli stati richiesti: {path}"
+        ),
+        "cache_environment_mismatch": (
+            "La cache appartiene all'ambiente {actual!r}, non a {expected!r}"
+        ),
+        "cache_max_age_positive": "--max-cache-age deve essere maggiore di zero",
+        "cache_too_old": (
+            "Cache troppo vecchia: {age_hours:.2f} ore; limite {max_age_hours:g} ore"
+        ),
+        "cache_changed_during_read": "Il file cache è cambiato durante la lettura: {path}",
+        "cache_check_failed": "Impossibile controllare la cache {path}: {error}",
+        "cache_symlink": "Il file cache non può essere un link simbolico: {path}",
+        "cache_not_regular": "Il percorso cache non è un file regolare: {path}",
+        "cache_wrong_owner": "Il file cache non appartiene all'utente corrente: {path}",
+        "cache_permissions": (
+            "Permessi non sicuri sul file cache {path}: {mode:04o}; richiesto 0600"
+        ),
+        "cache_not_readable": "Il file cache non è leggibile dal proprietario: {path}",
+        "cache_dir_create_failed": "Impossibile creare la directory cache {path}: {error}",
+        "cache_dir_check_failed": "Impossibile controllare la directory cache {path}: {error}",
+        "cache_dir_unsafe": "La directory cache non è sicura: {path}",
+        "cache_dir_wrong_owner": (
+            "La directory cache non appartiene all'utente corrente: {path}"
+        ),
+        "cache_dir_permissions": (
+            "Permessi non sicuri sulla directory cache {path}: {mode:04o}; richiesto 0700"
+        ),
         "rows_exported": "Esportate {count} righe in {path}",
         "empty_filter": "{option} non può essere vuoto",
         "no_results": "Nessun risultato.",
@@ -231,9 +306,16 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "help_json": "Print the complete JSON response",
         "help_csv": "Export all fields to a UTF-8 CSV file",
         "help_force": "Overwrite the file passed to --csv if it exists",
+        "help_cache": "Manage the local JSON certificate cache",
+        "help_cache_refresh": "Refresh the cache by querying every HARICA status",
+        "help_cache_status": "Show cache validity, source, age, and contents",
+        "help_cache_delete": "Delete the local cache",
+        "help_cache_file": "Alternative JSON cache file path",
+        "help_from_cache": "Read and filter the local cache without contacting HARICA",
+        "help_max_cache_age": "Maximum accepted cache age in hours",
         "help_version": "Show the version",
         "help_list": "List certificates by status",
-        "help_status": "Certificate status; all queries all three statuses (default: valid)",
+        "help_status": "Certificate status; all includes all three statuses (default: valid)",
         "help_fqdn": "Filter by FQDN, CN, SAN, or DN (case-insensitive partial match)",
         "help_friendly_name": "Filter by friendlyName (case-insensitive partial match)",
         "help_email": "Filter by email address (case-insensitive partial match)",
@@ -269,6 +351,74 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "confirmation_unavailable": "Interactive confirmation is unavailable; use --yes",
         "operation_cancelled": "Operation cancelled.",
         "api_key_deleted": "API key deleted for {environment} from {path}",
+        "cache_saved": (
+            "Cache refreshed for {environment}: {count} certificates in {path}"
+        ),
+        "cache_deleted": "Cache deleted for {environment} from {path}",
+        "cache_delete_prompt": (
+            "Delete the cache for {environment} from {path}? [y/N] "
+        ),
+        "cache_environment": "Cache environment",
+        "cache_base_url": "HARICA source",
+        "cache_created_at": "Created at",
+        "cache_age_hours": "Age (hours)",
+        "cache_certificates": "Certificates",
+        "cache_file_requires_from_cache": (
+            "--cache-file with list requires --from-cache"
+        ),
+        "cache_age_requires_from_cache": (
+            "--max-cache-age with list requires --from-cache"
+        ),
+        "cache_custom_url_requires_file": (
+            "cache refresh with --base-url requires an explicit --cache-file"
+        ),
+        "cache_absolute_xdg": "XDG_CACHE_HOME must be an absolute path",
+        "cache_absolute_home": "HOME must produce an absolute cache path",
+        "cache_not_serializable": "Certificates cannot be serialized as JSON: {error}",
+        "cache_response_invalid": (
+            "The HARICA response cannot be used to create the cache"
+        ),
+        "cache_write_failed": "Unable to write cache file {path}: {error}",
+        "cache_read_failed": "Unable to read cache file {path}: {error}",
+        "cache_delete_failed": "Unable to delete cache file {path}: {error}",
+        "cache_missing": "Cache file not found: {path}",
+        "cache_empty": "Cache file is empty: {path}",
+        "cache_invalid_json": "Cache file does not contain valid JSON: {path}",
+        "cache_invalid_structure": "Invalid cache structure: {path}",
+        "cache_schema_unsupported": (
+            "Unsupported cache schema version: {actual!r}; expected {expected}"
+        ),
+        "cache_invalid_timestamp": "Invalid cache timestamp: {path}",
+        "cache_timestamp_future": "Cache timestamp is in the future: {path}",
+        "cache_datetime_timezone": "Cache timestamp must include a time zone",
+        "cache_incomplete_statuses": (
+            "Cache does not contain every required status: {path}"
+        ),
+        "cache_environment_mismatch": (
+            "Cache belongs to environment {actual!r}, not {expected!r}"
+        ),
+        "cache_max_age_positive": "--max-cache-age must be greater than zero",
+        "cache_too_old": (
+            "Cache is too old: {age_hours:.2f} hours; limit {max_age_hours:g} hours"
+        ),
+        "cache_changed_during_read": "Cache file changed while being read: {path}",
+        "cache_check_failed": "Unable to inspect cache file {path}: {error}",
+        "cache_symlink": "Cache file cannot be a symbolic link: {path}",
+        "cache_not_regular": "Cache path is not a regular file: {path}",
+        "cache_wrong_owner": "Cache file is not owned by the current user: {path}",
+        "cache_permissions": (
+            "Unsafe cache file permissions for {path}: {mode:04o}; 0600 required"
+        ),
+        "cache_not_readable": "Cache file is not readable by its owner: {path}",
+        "cache_dir_create_failed": "Unable to create cache directory {path}: {error}",
+        "cache_dir_check_failed": "Unable to inspect cache directory {path}: {error}",
+        "cache_dir_unsafe": "Cache directory is unsafe: {path}",
+        "cache_dir_wrong_owner": (
+            "Cache directory is not owned by the current user: {path}"
+        ),
+        "cache_dir_permissions": (
+            "Unsafe cache directory permissions for {path}: {mode:04o}; 0700 required"
+        ),
         "rows_exported": "Exported {count} rows to {path}",
         "empty_filter": "{option} cannot be empty",
         "no_results": "No results.",

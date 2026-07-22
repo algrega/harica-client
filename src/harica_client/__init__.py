@@ -1,6 +1,6 @@
 """Client Python per le API Certificate Manager di HARICA."""
 
-__version__ = "0.12.2"
+__version__ = "0.13.0"
 
 from .client import Environment, HaricaClient, RetryPolicy
 from .errors import (

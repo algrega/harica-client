@@ -25,6 +25,7 @@ rate limiting.
 - listing `valid`, `revoked`, `expired`, or all certificates;
 - certificate lookup by serial number;
 - local filtering by FQDN, `friendlyName`, and email address;
+- optional local JSON cache for repeated offline filtering;
 - retries for `429`, `502`, `503`, and `504` with exponential backoff and jitter;
 - HTTPS enforcement and fail-closed handling of authenticated redirects;
 - support for `Retry-After` as seconds or an HTTP date;
@@ -167,6 +168,18 @@ The crontab contains no secret. An explicit `HOME` makes configuration determini
 cron's minimal environment. Create output and log directories in advance with permissions
 appropriate for the service account.
 
+To refresh once and perform later exports without more API calls, use two jobs:
+
+```cron
+HARICA_CLIENT_CACHE_FILE=/home/harica/.cache/harica-client/certificates/production.json
+
+30 5 * * * /bin/sh -c 'umask 077; exec harica-client cache refresh --environment production' >> /home/harica/log/harica-client.log 2>&1
+0 6 * * * /bin/sh -c 'umask 077; exec harica-client list --from-cache --max-cache-age 24 --status valid --csv /home/harica/exports/valid-certificates.csv --force' >> /home/harica/log/harica-client.log 2>&1
+```
+
+If the refresh fails, the previous valid snapshot remains. The export job fails instead
+of silently contacting HARICA when the cache is missing, invalid, or too old.
+
 Do not store the key in `.zshrc`, `.profile`, crontab, CLI arguments, or repository files.
 `HARICA_API_KEY` remains useful for ephemeral CI execution but is not recommended for
 persistent server configuration.
@@ -203,6 +216,53 @@ HARICA exposes one endpoint per status, so `--status all` makes three sequential
 Retry and rate-limit handling apply independently to each request. Responses are merged,
 and a missing `status` field is added from the source endpoint.
 
+### Optional local cache
+
+The default `list` behavior does not use a cache. Create or refresh a complete snapshot
+explicitly when repeated searches should avoid further HARICA requests:
+
+```bash
+harica-client cache refresh --environment production
+harica-client cache status --environment production
+```
+
+`cache refresh` queries `valid`, `revoked`, and `expired` once and stores a versioned JSON
+snapshot. Subsequent reads are completely local and do not require an API key:
+
+```bash
+harica-client list --from-cache --status valid
+harica-client list --from-cache --fqdn example.org
+harica-client list --from-cache --friendly-name portal --email pki@example.org
+harica-client list --from-cache --status all --json
+harica-client list --from-cache --status all --csv cached-certificates.csv
+```
+
+The cache does not expire automatically. To reject a snapshot older than 24 hours without
+falling back to the network, use:
+
+```bash
+harica-client list --from-cache --max-cache-age 24 --status valid
+```
+
+Default locations are
+`${XDG_CACHE_HOME}/harica-client/certificates/{environment}.json` or
+`~/.cache/harica-client/certificates/{environment}.json`. Override the path with
+`--cache-file PATH` or `HARICA_CLIENT_CACHE_FILE`; the flag has precedence. A custom
+`--base-url` on `cache refresh` requires an explicit `--cache-file`.
+
+Cache directories are created with mode `0700` and files with mode `0600`. Symlinks,
+wrong ownership, and group/other access are rejected. Writes are atomic, so a failed
+refresh preserves the previous snapshot. The API key and the potentially large
+`certificate` field are never stored, but the cache can contain sensitive hostnames and
+email addresses. Keep it outside repositories and shared directories.
+
+Remove it explicitly with:
+
+```bash
+harica-client cache delete --environment production
+harica-client cache delete --environment production --yes
+```
+
 ### Filtering by FQDN, friendlyName, and email
 
 `list` performs local, case-insensitive partial matching. The FQDN filter considers FQDN,
@@ -224,8 +284,9 @@ harica-client list \
   --email pki@example.org
 ```
 
-JSON and CSV export use the same filtered results. Filtering happens after the single
-HARICA response and does not create one request per certificate.
+JSON and CSV export use the same filtered results. Live filtering happens after the
+HARICA response and does not create one request per certificate; with `--from-cache`,
+all status selection and filtering happen locally without any HARICA request.
 
 In every output format, `CN` remains separate from `friendlyName`. If HARICA does not
 provide a separate `commonName`, the client extracts CN from `dN`. All other field names

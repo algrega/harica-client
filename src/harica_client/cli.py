@@ -16,6 +16,13 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .cache import (
+    cache_age_hours,
+    delete_cache,
+    read_cache,
+    resolve_cache_path,
+    write_cache,
+)
 from .client import Environment, HaricaClient, RetryPolicy
 from .credentials import (
     credential_deletion_target,
@@ -191,6 +198,21 @@ def _add_output_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_cache_location_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--environment",
+        choices=[item.value for item in Environment],
+        default=Environment.PRODUCTION.value,
+        help=tr("help_environment"),
+    )
+    parser.add_argument(
+        "--cache-file",
+        metavar="PATH",
+        type=Path,
+        help=tr("help_cache_file"),
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = LocalizedArgumentParser(
         prog="harica-client",
@@ -264,6 +286,23 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="VALUE",
         help=tr("help_email"),
     )
+    list_parser.add_argument(
+        "--from-cache",
+        action="store_true",
+        help=tr("help_from_cache"),
+    )
+    list_parser.add_argument(
+        "--cache-file",
+        metavar="PATH",
+        type=Path,
+        help=tr("help_cache_file"),
+    )
+    list_parser.add_argument(
+        "--max-cache-age",
+        metavar="HOURS",
+        type=float,
+        help=tr("help_max_cache_age"),
+    )
     _add_output_arguments(list_parser)
     _add_connection_arguments(list_parser)
     list_parser.set_defaults(handler=_run_list)
@@ -300,6 +339,48 @@ def build_parser() -> argparse.ArgumentParser:
         help=tr("help_yes"),
     )
     auth_delete_parser.set_defaults(handler=_run_auth_delete)
+
+    cache_parser = subparsers.add_parser("cache", help=tr("help_cache"))
+    _add_language_argument(cache_parser)
+    cache_subparsers = cache_parser.add_subparsers(
+        dest="cache_command",
+        required=True,
+    )
+
+    cache_refresh_parser = cache_subparsers.add_parser(
+        "refresh",
+        help=tr("help_cache_refresh"),
+    )
+    _add_language_argument(cache_refresh_parser)
+    _add_connection_arguments(cache_refresh_parser)
+    cache_refresh_parser.add_argument(
+        "--cache-file",
+        metavar="PATH",
+        type=Path,
+        help=tr("help_cache_file"),
+    )
+    cache_refresh_parser.set_defaults(handler=_run_cache_refresh)
+
+    cache_status_parser = cache_subparsers.add_parser(
+        "status",
+        help=tr("help_cache_status"),
+    )
+    _add_language_argument(cache_status_parser)
+    _add_cache_location_arguments(cache_status_parser)
+    cache_status_parser.set_defaults(handler=_run_cache_status)
+
+    cache_delete_parser = cache_subparsers.add_parser(
+        "delete",
+        help=tr("help_cache_delete"),
+    )
+    _add_language_argument(cache_delete_parser)
+    _add_cache_location_arguments(cache_delete_parser)
+    cache_delete_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help=tr("help_yes"),
+    )
+    cache_delete_parser.set_defaults(handler=_run_cache_delete)
 
     return parser
 
@@ -350,7 +431,23 @@ def _run_language_reset(_args: argparse.Namespace) -> int:
 
 
 def _run_list(args: argparse.Namespace) -> int:
-    data = _client_from_args(args).list_certificates(args.status)
+    if not args.from_cache:
+        if args.cache_file is not None:
+            raise HaricaConfigurationError(tr("cache_file_requires_from_cache"))
+        if args.max_cache_age is not None:
+            raise HaricaConfigurationError(tr("cache_age_requires_from_cache"))
+        data = _client_from_args(args).list_certificates(args.status)
+    else:
+        cache_path = resolve_cache_path(
+            args.environment,
+            explicit_path=args.cache_file,
+        )
+        snapshot = read_cache(
+            cache_path,
+            expected_environment=args.environment,
+            max_age_hours=args.max_cache_age,
+        )
+        data = _filter_certificates_by_status(snapshot.certificates, args.status)
     data = _filter_certificates(
         data,
         fqdn=args.fqdn,
@@ -358,6 +455,85 @@ def _run_list(args: argparse.Namespace) -> int:
         email=args.email,
     )
     _render_or_export(data, args)
+    return 0
+
+
+def _run_cache_refresh(args: argparse.Namespace) -> int:
+    if args.base_url is not None and args.cache_file is None:
+        raise HaricaConfigurationError(tr("cache_custom_url_requires_file"))
+    client = _client_from_args(args)
+    data = _without_certificate(client.list_certificates("all"))
+    if not isinstance(data, list) or not all(isinstance(row, Mapping) for row in data):
+        raise HaricaConfigurationError(tr("cache_response_invalid"))
+    target = resolve_cache_path(
+        args.environment,
+        explicit_path=args.cache_file,
+    )
+    snapshot = write_cache(
+        target,
+        environment=args.environment,
+        base_url=client.base_url,
+        certificates=data,
+    )
+    _print_terminal(
+        tr(
+            "cache_saved",
+            environment=args.environment,
+            count=len(snapshot.certificates),
+            path=target,
+        )
+    )
+    return 0
+
+
+def _run_cache_status(args: argparse.Namespace) -> int:
+    target = resolve_cache_path(
+        args.environment,
+        explicit_path=args.cache_file,
+    )
+    try:
+        snapshot = read_cache(target, expected_environment=args.environment)
+    except HaricaConfigurationError as exc:
+        _print_terminal(f"{tr('status')}: {tr('invalid')}")
+        _print_terminal(f"{tr('path')}: {target}")
+        _print_terminal(f"{tr('detail')}: {exc}")
+        return 1
+    _print_terminal(f"{tr('status')}: {tr('valid')}")
+    _print_terminal(f"{tr('path')}: {target}")
+    _print_terminal(f"{tr('cache_environment')}: {snapshot.environment}")
+    _print_terminal(f"{tr('cache_base_url')}: {snapshot.base_url}")
+    created_at = snapshot.created_at.isoformat().replace("+00:00", "Z")
+    _print_terminal(f"{tr('cache_created_at')}: {created_at}")
+    _print_terminal(f"{tr('cache_age_hours')}: {cache_age_hours(snapshot):.2f}")
+    _print_terminal(f"{tr('cache_certificates')}: {len(snapshot.certificates)}")
+    return 0
+
+
+def _run_cache_delete(args: argparse.Namespace) -> int:
+    target = resolve_cache_path(
+        args.environment,
+        explicit_path=args.cache_file,
+    )
+    if not args.yes:
+        try:
+            answer = input(
+                _terminal_text(
+                    tr(
+                        "cache_delete_prompt",
+                        environment=args.environment,
+                        path=target,
+                    )
+                )
+            )
+        except EOFError as exc:
+            raise HaricaConfigurationError(tr("confirmation_unavailable")) from exc
+        if answer.strip().casefold() not in {"s", "si", "sì", "y", "yes"}:
+            _print_terminal(tr("operation_cancelled"))
+            return 0
+    deleted = delete_cache(target)
+    _print_terminal(
+        tr("cache_deleted", environment=args.environment, path=deleted)
+    )
     return 0
 
 
@@ -472,6 +648,20 @@ def _with_common_name(data: Any) -> Any:
                 return enriched
         return enrich(data)
     return data
+
+
+def _filter_certificates_by_status(
+    certificates: Sequence[Mapping[str, Any]],
+    status: str,
+) -> list[Mapping[str, Any]]:
+    """Seleziona localmente uno stato dalla fotografia completa della cache."""
+    if status == "all":
+        return list(certificates)
+    return [
+        row
+        for row in certificates
+        if str(row.get("status", "")).strip().casefold() == status
+    ]
 
 
 def _filter_certificates(

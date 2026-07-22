@@ -8,6 +8,7 @@ build/
 dist/
 .DS_Store
 /*.csv
+/*.cache.json
 .env
 .env.*
 *.key
