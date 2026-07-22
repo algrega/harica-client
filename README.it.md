@@ -29,6 +29,7 @@ rate limit HTTP 429.
 - HTTPS obbligatorio e gestione fail-closed dei redirect autenticati;
 - supporto a `Retry-After` sia in secondi sia come data HTTP;
 - errori distinti per autenticazione, rate limit, rete, HTTP e risposta non JSON;
+- neutralizzazione delle sequenze di controllo nell'output leggibile a terminale;
 - output tabellare o JSON ed esportazione CSV;
 - colonna `CN` nell'output tabellare, ricavata anche dal campo `dN`;
 - interfaccia CLI in italiano e inglese;
@@ -306,6 +307,11 @@ Per test controllati è disponibile `--base-url`. HTTPS è obbligatorio salvo in
 loopback (`localhost`, `127.0.0.0/8` e `::1`) e i redirect autenticati non vengono mai
 seguiti. Non usare una destinazione HTTPS personalizzata senza averla verificata,
 perché l'API key viene inviata a tale host.
+
+I caratteri di controllo ricevuti nei dati remoti o inclusi negli errori vengono
+neutralizzati nell'output leggibile a terminale; quelli non sicuri sono mostrati come
+sequenze di escape visibili. Questa sanitizzazione non viene applicata a JSON e CSV,
+che mantengono le regole di export esistenti, inclusa la protezione dalle formule CSV.
 
 ## Uso come libreria
 

@@ -16,6 +16,7 @@ from harica_client.cli import (
     _filter_certificates,
     _print_table,
     _render_or_export,
+    _terminal_text,
     _without_certificate,
     _write_csv,
     build_parser,
@@ -35,7 +36,7 @@ class CliTests(unittest.TestCase):
         with redirect_stdout(output):
             code = main(["version"])
         self.assertEqual(code, 0)
-        self.assertEqual(output.getvalue().strip(), "0.12.1")
+        self.assertEqual(output.getvalue().strip(), "0.12.2")
 
     def test_extract_wrapped_rows(self) -> None:
         self.assertEqual(
@@ -51,6 +52,71 @@ class CliTests(unittest.TestCase):
         self.assertIn("serialNumber", rendered)
         self.assertIn("CN", rendered)
         self.assertIn("example.org", rendered)
+
+    def test_terminal_text_neutralizes_controls_and_preserves_normal_unicode(self) -> None:
+        malicious = (
+            "\x1b[31mRED\x1b[0m\x1b]52;c;ZmFrZQ==\x07"
+            "\r\n\t\x00\u202e\u2028\ud800"
+        )
+
+        rendered = _terminal_text(malicious)
+
+        for character in ("\x1b", "\x07", "\x00", "\u202e", "\u2028", "\ud800"):
+            self.assertNotIn(character, rendered)
+        self.assertIn(r"\x1b[31mRED\x1b[0m", rendered)
+        self.assertIn(r"\x1b]52;c;ZmFrZQ==\x07", rendered)
+        self.assertIn(r"\x00\u202e\u2028\ud800", rendered)
+        self.assertIn("   ", rendered)
+        self.assertEqual(_terminal_text("caffè – Αθήνα"), "caffè – Αθήνα")
+
+    def test_table_neutralizes_terminal_sequences_in_remote_fields(self) -> None:
+        malicious = "portal.example.org\x1b[2J\x1b]52;c;ZmFrZQ==\x07\u202e"
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            _print_table([{"friendlyName": malicious}])
+
+        rendered = output.getvalue()
+        self.assertNotIn("\x1b", rendered)
+        self.assertNotIn("\x07", rendered)
+        self.assertNotIn("\u202e", rendered)
+        self.assertIn(r"\x1b[2J", rendered)
+        self.assertIn(r"\x1b]52;c;ZmFrZQ==\x07", rendered)
+
+    def test_application_errors_neutralize_terminal_sequences(self) -> None:
+        malicious = "remote error\x1b[2J\x07\u202e"
+        output = io.StringIO()
+        errors = io.StringIO()
+
+        with (
+            patch(
+                "harica_client.cli._run_version",
+                side_effect=HaricaConfigurationError(malicious),
+            ),
+            redirect_stdout(output),
+            redirect_stderr(errors),
+        ):
+            code = main(["version"])
+
+        rendered = output.getvalue() + errors.getvalue()
+        self.assertEqual(code, 1)
+        self.assertNotIn("\x1b", rendered)
+        self.assertNotIn("\x07", rendered)
+        self.assertNotIn("\u202e", rendered)
+        self.assertIn(r"\x1b[2J\x07\u202e", rendered)
+
+    def test_argparse_errors_neutralize_terminal_sequences(self) -> None:
+        malicious = "valid\x1b[2J\x07\u202e"
+        errors = io.StringIO()
+
+        with redirect_stderr(errors), self.assertRaises(SystemExit) as caught:
+            main(["list", "--status", malicious])
+
+        rendered = errors.getvalue()
+        self.assertEqual(caught.exception.code, 2)
+        self.assertNotIn("\x1b", rendered)
+        self.assertNotIn("\x07", rendered)
+        self.assertNotIn("\u202e", rendered)
 
     def test_table_extracts_cn_from_dn_when_friendly_name_differs(self) -> None:
         output = io.StringIO()
@@ -87,6 +153,17 @@ class CliTests(unittest.TestCase):
         exported = json.loads(output.getvalue())
         self.assertEqual(exported[0]["CN"], "portal.example.org")
 
+    def test_json_export_preserves_control_characters_as_data(self) -> None:
+        value = "portal.example.org\x1b[2J\u202e"
+        output = io.StringIO()
+        args = SimpleNamespace(csv=None, json=True, force=False)
+
+        with redirect_stdout(output):
+            _render_or_export([{"serial": "01", "friendlyName": value}], args)
+
+        exported = json.loads(output.getvalue())
+        self.assertEqual(exported[0]["friendlyName"], value)
+
     def test_csv_export_contains_derived_cn(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "certificates.csv"
@@ -100,6 +177,16 @@ class CliTests(unittest.TestCase):
                 exported = next(csv.DictReader(stream))
 
         self.assertEqual(exported["CN"], "portal.example.org")
+
+    def test_csv_export_preserves_control_characters_as_data(self) -> None:
+        value = "portal.example.org\x1b[2J\u202e"
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "certificates.csv"
+            _write_csv([{"friendlyName": value}], target)
+            with target.open(encoding="utf-8-sig", newline="") as stream:
+                exported = next(csv.DictReader(stream))
+
+        self.assertEqual(exported["friendlyName"], value)
 
     def test_fqdn_filter_matches_dn_san_and_friendly_name(self) -> None:
         data = [

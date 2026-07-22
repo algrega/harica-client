@@ -29,6 +29,7 @@ rate limiting.
 - HTTPS enforcement and fail-closed handling of authenticated redirects;
 - support for `Retry-After` as seconds or an HTTP date;
 - distinct errors for authentication, rate limiting, networking, HTTP, and non-JSON responses;
+- neutralization of terminal control sequences in human-readable output;
 - table or JSON output and CSV export;
 - a `CN` field derived from `dN` when necessary;
 - Italian and English CLI messages;
@@ -261,6 +262,11 @@ Default environments are:
 addresses (`localhost`, `127.0.0.0/8`, and `::1`). Authenticated redirects are never
 followed. Do not use a custom HTTPS destination without verifying it, because the API
 key is sent to that host.
+
+Control characters received from remote data or included in errors are neutralized in
+human-readable terminal output, with unsafe controls shown as visible escape sequences.
+This terminal sanitization is not applied to JSON or CSV; those formats retain their
+existing export semantics, including CSV formula-prefix protection.
 
 ## Library usage
 

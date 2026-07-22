@@ -10,6 +10,7 @@ import json
 import os
 import sys
 import tempfile
+import unicodedata
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -70,6 +71,32 @@ _EMAIL_FIELDS = frozenset(
 )
 
 
+def _terminal_text(value: Any) -> str:
+    """Rende inerti e visibili i controlli in testo destinato al terminale."""
+    rendered: list[str] = []
+    for character in str(value):
+        codepoint = ord(character)
+        category = unicodedata.category(character)
+
+        if character in {"\n", "\r", "\t"}:
+            rendered.append(" ")
+        elif category in {"Cc", "Cf", "Cs", "Zl", "Zp"}:
+            if codepoint <= 0xFF:
+                rendered.append(f"\\x{codepoint:02x}")
+            elif codepoint <= 0xFFFF:
+                rendered.append(f"\\u{codepoint:04x}")
+            else:
+                rendered.append(f"\\U{codepoint:08x}")
+        else:
+            rendered.append(character)
+    return "".join(rendered)
+
+
+def _print_terminal(value: Any, *, file: Any = None) -> None:
+    """Stampa una singola riga dopo la sanitizzazione del contenuto dinamico."""
+    print(_terminal_text(value), file=file)
+
+
 class LocalizedArgumentParser(argparse.ArgumentParser):
     """ArgumentParser con help ed errori controllati dalla lingua della CLI."""
 
@@ -88,10 +115,13 @@ class LocalizedArgumentParser(argparse.ArgumentParser):
 
     def error(self, message: str) -> None:
         self.print_usage(sys.stderr)
+        rendered = _terminal_text(
+            f"{self.prog}: {tr('error').casefold()}: "
+            f"{localize_argparse_error(message)}"
+        )
         self.exit(
             2,
-            f"{self.prog}: {tr('error').casefold()}: "
-            f"{localize_argparse_error(message)}\n",
+            f"{rendered}\n",
         )
 
 
@@ -296,26 +326,26 @@ def _run_version(_args: argparse.Namespace) -> int:
 def _run_language_set(args: argparse.Namespace) -> int:
     path = write_saved_language(args.language_value)
     with using_language(args.language_value):
-        print(tr("language_saved", language=args.language_value, path=path))
+        _print_terminal(tr("language_saved", language=args.language_value, path=path))
     return 0
 
 
 def _run_language_status(args: argparse.Namespace) -> int:
     preference = args.language_preference
     source = tr(f"language_source_{preference.source}")
-    print(f"{tr('language_label')}: {preference.language}")
-    print(f"{tr('source')}: {source}")
+    _print_terminal(f"{tr('language_label')}: {preference.language}")
+    _print_terminal(f"{tr('source')}: {source}")
     path = preference.path or default_language_path()
-    print(f"{tr('path')}: {path}")
+    _print_terminal(f"{tr('path')}: {path}")
     return 0
 
 
 def _run_language_reset(_args: argparse.Namespace) -> int:
     path = delete_saved_language()
     if path is None:
-        print(tr("language_not_saved"))
+        _print_terminal(tr("language_not_saved"))
     else:
-        print(tr("language_reset", path=path))
+        _print_terminal(tr("language_reset", path=path))
     return 0
 
 
@@ -347,7 +377,7 @@ def _run_auth_set(args: argparse.Namespace) -> int:
     if not hmac.compare_digest(first, second):
         raise HaricaConfigurationError(tr("api_keys_mismatch"))
     written = write_api_key_file(target, first)
-    print(tr("api_key_saved", environment=args.environment, path=written))
+    _print_terminal(tr("api_key_saved", environment=args.environment, path=written))
     return 0
 
 
@@ -356,18 +386,18 @@ def _run_auth_status(args: argparse.Namespace) -> int:
         args.environment,
         explicit_path=args.api_key_file,
     )
-    print(f"{tr('status')}: {tr('valid') if status.valid else tr('invalid')}")
-    print(f"{tr('source')}: {status.source}")
+    _print_terminal(f"{tr('status')}: {tr('valid') if status.valid else tr('invalid')}")
+    _print_terminal(f"{tr('source')}: {status.source}")
     if status.path is not None:
-        print(f"{tr('path')}: {status.path}")
-        print(
+        _print_terminal(f"{tr('path')}: {status.path}")
+        _print_terminal(
             f"{tr('permissions')}: "
             f"{tr('permissions_valid') if status.valid else tr('permissions_fix')}"
         )
     else:
-        print(f"{tr('path')}: {tr('not_applicable')}")
-        print(f"{tr('permissions')}: {tr('not_applicable')}")
-    print(f"{tr('detail')}: {status.detail}")
+        _print_terminal(f"{tr('path')}: {tr('not_applicable')}")
+        _print_terminal(f"{tr('permissions')}: {tr('not_applicable')}")
+    _print_terminal(f"{tr('detail')}: {status.detail}")
     return 0 if status.valid else 1
 
 
@@ -378,14 +408,18 @@ def _run_auth_delete(args: argparse.Namespace) -> int:
     )
     if not args.yes:
         try:
-            answer = input(tr("delete_prompt", environment=args.environment, path=target))
+            answer = input(
+                _terminal_text(
+                    tr("delete_prompt", environment=args.environment, path=target)
+                )
+            )
         except EOFError as exc:
             raise HaricaConfigurationError(tr("confirmation_unavailable")) from exc
         if answer.strip().casefold() not in {"s", "si", "sì", "y", "yes"}:
-            print(tr("operation_cancelled"))
+            _print_terminal(tr("operation_cancelled"))
             return 0
     deleted = delete_api_key_file(target)
-    print(tr("api_key_deleted", environment=args.environment, path=deleted))
+    _print_terminal(tr("api_key_deleted", environment=args.environment, path=deleted))
     return 0
 
 
@@ -394,7 +428,7 @@ def _render_or_export(data: Any, args: argparse.Namespace) -> None:
     data = _with_common_name(data)
     if args.csv is not None:
         row_count = _write_csv(data, args.csv, force=args.force)
-        print(
+        _print_terminal(
             tr(
                 "rows_exported",
                 count=row_count,
@@ -549,7 +583,7 @@ def _print_data(data: Any, *, force_json: bool) -> None:
         print(tr("no_results"))
         return
     if not all(isinstance(row, Mapping) for row in rows):
-        print(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True))
+        _print_terminal(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True))
         return
     _print_table(rows)
 
@@ -655,15 +689,22 @@ def _print_table(rows: Sequence[Mapping[str, Any]]) -> None:
     if not columns:
         columns = sorted(available)[:7]
     if not columns:
-        print(json.dumps(list(rows), ensure_ascii=False, indent=2, sort_keys=True))
+        _print_terminal(
+            json.dumps(list(rows), ensure_ascii=False, indent=2, sort_keys=True)
+        )
         return
 
+    safe_columns = [_terminal_text(column) for column in columns]
     rendered = [[_cell(row.get(column)) for column in columns] for row in display_rows]
     widths = [
         min(48, max(len(column), *(len(row[index]) for row in rendered)))
-        for index, column in enumerate(columns)
+        for index, column in enumerate(safe_columns)
     ]
-    print("  ".join(column.ljust(widths[index]) for index, column in enumerate(columns)))
+    print(
+        "  ".join(
+            column.ljust(widths[index]) for index, column in enumerate(safe_columns)
+        )
+    )
     print("  ".join("-" * width for width in widths))
     for row in rendered:
         print(
@@ -678,7 +719,7 @@ def _common_name(row: Mapping[str, Any]) -> str:
     """Restituisce il CN esplicito oppure lo estrae dal distinguished name."""
     for key, value in row.items():
         if _normalized_field_name(key) in {"cn", "commonname"} and _is_scalar(value):
-            common_name = _cell(value).strip()
+            common_name = str(value).strip()
             if common_name:
                 return common_name
 
@@ -766,7 +807,7 @@ def _cell(value: Any) -> str:
         return ""
     if isinstance(value, bool):
         return "true" if value else "false"
-    return str(value).replace("\n", " ")
+    return _terminal_text(value)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -785,18 +826,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             return int(args.handler(args))
         except HaricaRateLimitError as exc:
-            print(f"{tr('error')}: {exc}", file=sys.stderr)
+            _print_terminal(f"{tr('error')}: {exc}", file=sys.stderr)
             return 75
         except HaricaResponseError as exc:
-            print(f"{tr('error')}: {exc}", file=sys.stderr)
+            _print_terminal(f"{tr('error')}: {exc}", file=sys.stderr)
             if exc.body_preview:
-                print(f"{tr('response_preview')}: {exc.body_preview!r}", file=sys.stderr)
+                _print_terminal(
+                    f"{tr('response_preview')}: {exc.body_preview!r}",
+                    file=sys.stderr,
+                )
             return 1
         except HaricaError as exc:
-            print(f"{tr('error')}: {exc}", file=sys.stderr)
+            _print_terminal(f"{tr('error')}: {exc}", file=sys.stderr)
             return 1
         except ValueError as exc:
-            print(f"{tr('configuration_error')}: {exc}", file=sys.stderr)
+            _print_terminal(f"{tr('configuration_error')}: {exc}", file=sys.stderr)
             return 2
 
 
