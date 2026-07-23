@@ -84,7 +84,9 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "help_email": "Filtra per indirizzo email (ricerca parziale case-insensitive)",
         "help_serial": "Cerca un certificato per seriale",
         "help_download": "Scarica un certificato X.509 PEM e ne mostra il riepilogo",
-        "help_download_output": "File PEM di destinazione (obbligatorio)",
+        "help_download_output": (
+            "File PEM di destinazione; se omesso usa un nome derivato dal CN"
+        ),
         "help_download_force": "Sovrascrive il file PEM se esiste",
         "download_summary_path": "Percorso",
         "download_summary_serial": "Seriale",
@@ -92,6 +94,12 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "download_summary_issuer": "Emittente",
         "download_summary_valid_from": "Valido dal",
         "download_summary_valid_until": "Valido fino al",
+        "download_common_name_ambiguous": (
+            "Il certificato contiene più CN differenti; specificare --output"
+        ),
+        "download_current_directory_failed": (
+            "Impossibile determinare la directory corrente: {error}"
+        ),
         "serial_number": "Numero seriale del certificato",
         "help_auth": "Gestisce l'API key su filesystem",
         "help_auth_set": "Salva o ruota una API key",
@@ -375,7 +383,9 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "help_email": "Filter by email address (case-insensitive partial match)",
         "help_serial": "Find a certificate by serial number",
         "help_download": "Download an X.509 PEM certificate and show its summary",
-        "help_download_output": "Destination PEM file (required)",
+        "help_download_output": (
+            "Destination PEM file; if omitted, use a name derived from the CN"
+        ),
         "help_download_force": "Overwrite the PEM file if it exists",
         "download_summary_path": "Path",
         "download_summary_serial": "Serial",
@@ -383,6 +393,12 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "download_summary_issuer": "Issuer",
         "download_summary_valid_from": "Valid from",
         "download_summary_valid_until": "Valid until",
+        "download_common_name_ambiguous": (
+            "The certificate contains multiple different CN values; specify --output"
+        ),
+        "download_current_directory_failed": (
+            "Unable to determine the current directory: {error}"
+        ),
         "serial_number": "Certificate serial number",
         "help_auth": "Manage the API key on the filesystem",
         "help_auth_set": "Save or rotate an API key",

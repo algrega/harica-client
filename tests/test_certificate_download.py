@@ -14,12 +14,14 @@ from harica_client.certificate_download import (
     CertificateSummary,
     _parse_asn1_time,
     _parse_name,
+    _parse_name_details,
+    automatic_download_filename,
     certificate_summary_from_pem,
     extract_certificate_pem,
     validate_download_destination,
     write_certificate_pem,
 )
-from harica_client.cli import main
+from harica_client.cli import build_parser, main
 from harica_client.errors import HaricaConfigurationError
 from harica_client.i18n import using_language
 
@@ -127,6 +129,7 @@ class CertificateExtractionTests(unittest.TestCase):
                 issuer="CN=example.org",
                 not_before="2026-07-23T08:26:40Z",
                 not_after="2026-07-24T08:26:40Z",
+                common_names=("example.org",),
             ),
         )
 
@@ -172,6 +175,85 @@ class CertificateExtractionTests(unittest.TestCase):
             _parse_asn1_time(0x18, b"20510102030405+0100"),
             "2051-01-02T02:04:05Z",
         )
+
+
+class AutomaticFilenameTests(unittest.TestCase):
+    def _summary(
+        self,
+        *common_names: str,
+        serial_number: str = "AABB01",
+    ) -> CertificateSummary:
+        return CertificateSummary(
+            serial_number=serial_number,
+            subject="",
+            issuer="",
+            not_before="2020-01-01T00:00:00Z",
+            not_after="2030-01-01T00:00:00Z",
+            common_names=common_names,
+        )
+
+    def test_uses_normal_common_name_and_preserves_case(self) -> None:
+        self.assertEqual(
+            automatic_download_filename(self._summary("Portal.Example.org")),
+            "Portal.Example.org.pem",
+        )
+
+    def test_converts_wildcard_and_sanitizes_unsafe_characters(self) -> None:
+        cases = (
+            ("*.example.org", "wildcard.example.org.pem"),
+            ("Ｐortal.example.org", "Portal.example.org.pem"),
+            ("Portale città", "Portale_citt_.pem"),
+            ("../../etc/passwd", "_.._etc_passwd.pem"),
+            ("name/with\\controls\x00\x1b", "name_with_controls_.pem"),
+        )
+        for common_name, expected in cases:
+            with self.subTest(common_name=common_name):
+                self.assertEqual(
+                    automatic_download_filename(self._summary(common_name)),
+                    expected,
+                )
+
+    def test_falls_back_to_serial_for_missing_or_unusable_common_name(self) -> None:
+        for common_names in ((), ("",), ("***",), ("é",)):
+            with self.subTest(common_names=common_names):
+                self.assertEqual(
+                    automatic_download_filename(self._summary(*common_names)),
+                    "AABB01.pem",
+                )
+
+    def test_accepts_identical_common_names_and_rejects_different_values(self) -> None:
+        self.assertEqual(
+            automatic_download_filename(
+                self._summary(" example.org ", "example.org")
+            ),
+            "example.org.pem",
+        )
+        with self.assertRaises(HaricaConfigurationError):
+            automatic_download_filename(
+                self._summary("one.example.org", "two.example.org")
+            )
+
+    def test_long_name_is_truncated_with_deterministic_hash(self) -> None:
+        common_name = f"{'a' * 220}.example.org"
+        first = automatic_download_filename(self._summary(common_name))
+        second = automatic_download_filename(self._summary(common_name))
+
+        self.assertEqual(first, second)
+        self.assertEqual(len(first.removesuffix(".pem")), 200)
+        self.assertRegex(first, r"-[0-9a-f]{12}\.pem$")
+
+    def test_name_parser_collects_common_names_structurally(self) -> None:
+        first = _tlv(0x06, b"\x55\x04\x03") + _tlv(0x0C, b"one.example.org")
+        second = _tlv(0x06, b"\x55\x04\x03") + _tlv(0x0C, b"two.example.org")
+        name = (
+            _tlv(0x31, _tlv(0x30, first))
+            + _tlv(0x31, _tlv(0x30, second))
+        )
+
+        rendered, common_names = _parse_name_details(name, 0, len(name))
+
+        self.assertEqual(rendered, "CN=one.example.org, CN=two.example.org")
+        self.assertEqual(common_names, ("one.example.org", "two.example.org"))
 
 
 class CertificateDestinationTests(unittest.TestCase):
@@ -275,6 +357,117 @@ class DownloadCliTests(unittest.TestCase):
         )
         self.assertNotIn("BEGIN CERTIFICATE", rendered)
         self.assertNotIn(api_key, rendered)
+
+    def test_download_without_output_uses_cn_in_current_directory(self) -> None:
+        client = Mock()
+        client.certificate_by_serial.return_value = {"certificate": CERTIFICATE_PEM}
+        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "example.org.pem"
+            with (
+                patch("harica_client.cli._client_from_args", return_value=client),
+                patch(
+                    "harica_client.certificate_download.Path.cwd",
+                    return_value=Path(directory),
+                ),
+                redirect_stdout(output),
+                redirect_stderr(io.StringIO()),
+            ):
+                code = main(["download", "01", "--language", "it"])
+
+            self.assertEqual(target.read_text(encoding="ascii"), CERTIFICATE_PEM)
+
+        self.assertEqual(code, 0)
+        client.certificate_by_serial.assert_called_once_with("01")
+        self.assertIn(f"Percorso: {target}", output.getvalue())
+
+    def test_automatic_destination_collision_requires_force(self) -> None:
+        client = Mock()
+        client.certificate_by_serial.return_value = {"certificate": CERTIFICATE_PEM}
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "example.org.pem"
+            target.write_text("old", encoding="ascii")
+            current_directory = patch(
+                "harica_client.certificate_download.Path.cwd",
+                return_value=Path(directory),
+            )
+            with (
+                patch("harica_client.cli._client_from_args", return_value=client),
+                current_directory,
+                redirect_stdout(io.StringIO()),
+                redirect_stderr(io.StringIO()),
+            ):
+                rejected = main(["download", "01"])
+
+            self.assertEqual(rejected, 1)
+            self.assertEqual(target.read_text(encoding="ascii"), "old")
+
+            with (
+                patch("harica_client.cli._client_from_args", return_value=client),
+                patch(
+                    "harica_client.certificate_download.Path.cwd",
+                    return_value=Path(directory),
+                ),
+                redirect_stdout(io.StringIO()),
+                redirect_stderr(io.StringIO()),
+            ):
+                replaced = main(["download", "01", "--force"])
+
+            self.assertEqual(replaced, 0)
+            self.assertEqual(target.read_text(encoding="ascii"), CERTIFICATE_PEM)
+
+    def test_automatic_destination_rejects_symlink_even_with_force(self) -> None:
+        client = Mock()
+        client.certificate_by_serial.return_value = {"certificate": CERTIFICATE_PEM}
+        with tempfile.TemporaryDirectory() as directory:
+            victim = Path(directory) / "victim.pem"
+            victim.write_text("old", encoding="ascii")
+            target = Path(directory) / "example.org.pem"
+            target.symlink_to(victim)
+
+            with (
+                patch("harica_client.cli._client_from_args", return_value=client),
+                patch(
+                    "harica_client.certificate_download.Path.cwd",
+                    return_value=Path(directory),
+                ),
+                redirect_stdout(io.StringIO()),
+                redirect_stderr(io.StringIO()),
+            ):
+                code = main(["download", "01", "--force"])
+
+            self.assertEqual(code, 1)
+            self.assertTrue(target.is_symlink())
+            self.assertEqual(victim.read_text(encoding="ascii"), "old")
+
+    def test_explicit_output_does_not_require_unambiguous_common_name(self) -> None:
+        client = Mock()
+        client.certificate_by_serial.return_value = {"certificate": CERTIFICATE_PEM}
+        summary = CertificateSummary(
+            serial_number="01",
+            subject="CN=one.example.org, CN=two.example.org",
+            issuer="CN=issuer",
+            not_before="2020-01-01T00:00:00Z",
+            not_after="2030-01-01T00:00:00Z",
+            common_names=("one.example.org", "two.example.org"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "chosen.pem"
+            with (
+                patch("harica_client.cli._client_from_args", return_value=client),
+                patch(
+                    "harica_client.cli.certificate_summary_from_pem",
+                    return_value=summary,
+                ),
+                redirect_stdout(io.StringIO()),
+                redirect_stderr(io.StringIO()),
+            ):
+                code = main(
+                    ["download", "01", "--output", str(target)]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(target.read_text(encoding="ascii"), CERTIFICATE_PEM)
 
     def test_download_summary_is_localized_in_english(self) -> None:
         client = Mock()
@@ -458,12 +651,9 @@ class DownloadCliTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("valid X.509 certificate", errors.getvalue())
 
-    def test_output_is_required_and_help_is_bilingual(self) -> None:
-        errors = io.StringIO()
-        with redirect_stderr(errors), self.assertRaises(SystemExit) as caught:
-            main(["download", "01"])
-        self.assertEqual(caught.exception.code, 2)
-        self.assertIn("--output", errors.getvalue())
+    def test_output_is_optional_and_help_is_bilingual(self) -> None:
+        arguments = build_parser().parse_args(["download", "01"])
+        self.assertIsNone(arguments.output)
 
         output = io.StringIO()
         with (
@@ -474,3 +664,4 @@ class DownloadCliTests(unittest.TestCase):
             main(["download", "--language", "en", "--help"])
         self.assertEqual(caught.exception.code, 0)
         self.assertIn("Destination PEM file", output.getvalue())
+        self.assertIn("if omitted", output.getvalue())

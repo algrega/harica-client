@@ -24,6 +24,7 @@ from .cache import (
     write_cache,
 )
 from .certificate_download import (
+    automatic_download_destination,
     certificate_summary_from_pem,
     extract_certificate_pem,
     validate_download_destination,
@@ -330,7 +331,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         metavar="FILE",
         type=Path,
-        required=True,
         help=tr("help_download_output"),
     )
     download_parser.add_argument(
@@ -571,10 +571,15 @@ def _run_serial(args: argparse.Namespace) -> int:
 
 
 def _run_download(args: argparse.Namespace) -> int:
-    target = validate_download_destination(args.output, force=args.force)
+    target = None
+    if args.output is not None:
+        target = validate_download_destination(args.output, force=args.force)
     response = _client_from_args(args).certificate_by_serial(args.serial_number)
     certificate_pem = extract_certificate_pem(response)
     summary = certificate_summary_from_pem(certificate_pem)
+    if target is None:
+        target = automatic_download_destination(summary)
+        validate_download_destination(target, force=args.force)
     written = write_certificate_pem(target, certificate_pem, force=args.force)
     _print_terminal(f"{tr('download_summary_path')}: {written}")
     _print_terminal(

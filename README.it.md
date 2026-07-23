@@ -24,7 +24,7 @@ rate limit HTTP 429.
 - ambienti `production`, `staging` e `development`;
 - elenco certificati `valid`, `revoked`, `expired` oppure di tutti gli stati;
 - ricerca di un certificato per numero seriale;
-- download del certificato finale per numero seriale in formato PEM;
+- download del certificato finale con nome PEM automatico derivato dal CN;
 - ricerca locale per FQDN, `friendlyName` e indirizzo email;
 - cache JSON locale opzionale per filtri offline ripetuti;
 - retry di `429`, `502`, `503` e `504` con backoff esponenziale e jitter;
@@ -212,6 +212,7 @@ harica-client list --status all --csv tutti-i-certificati.csv
 harica-client list --status expired --environment staging
 harica-client serial 'NUMERO-SERIALE' --json
 harica-client serial 'NUMERO-SERIALE' --csv certificato.csv
+harica-client download 'NUMERO-SERIALE'
 harica-client download 'NUMERO-SERIALE' --output certificato.pem
 ```
 
@@ -367,7 +368,10 @@ harica-client list --status valid --csv certificati-validi.csv --force
 Per scaricare il certificato X.509 finale restituito dalla ricerca per seriale:
 
 ```bash
-harica-client download 'NUMERO-SERIALE' --output certificato.pem
+harica-client download 'NUMERO-SERIALE'
+# salva ./portal.example.org.pem
+
+harica-client download 'NUMERO-SERIALE' --output nome-personalizzato.pem
 ```
 
 Dopo il salvataggio, il comando mostra sempre un riepilogo leggibile:
@@ -388,6 +392,12 @@ leggibile, ma non verifica chain di fiducia, revoca, hostname o validità tempor
 corrente.
 Il riepilogo è destinato alla lettura umana e non è un formato dati stabile per script.
 
+Senza `--output`, il nome viene costruito dal CN del subject e il file viene salvato
+nella directory corrente. I CN wildcard come `*.example.org` diventano
+`wildcard.example.org.pem`; i caratteri non sicuri per il filesystem vengono
+sostituiti. Se manca un CN utilizzabile viene usato il seriale del certificato. Più CN
+differenti richiedono un `--output` esplicito.
+
 `download` esegue sempre una ricerca puntuale in rete e richiede quindi la API key. Non
 usa la cache locale, che esclude intenzionalmente il contenuto dei certificati. Il
 comando accetta le stesse opzioni di connessione di `serial`, incluse `--environment`,
@@ -398,11 +408,11 @@ certificati concatenati e valori malformati vengono rifiutati. HARICA può resti
 PEM o un DER codificato in base64; il file salvato viene normalizzato in PEM con
 terminatori LF, newline finale e permessi `0644`.
 
-Il nome di destinazione deve essere sempre esplicito. Un file regolare esistente resta
-intatto salvo l'uso di `--force`; link simbolici e destinazioni non regolari vengono
-rifiutati anche con `--force`. La scrittura usa un file temporaneo nella directory di
-destinazione seguito da sostituzione atomica. Il contenuto PEM non viene mai stampato
-nel terminale o nei log.
+Usa `--output` per scegliere un nome o una directory differenti. Un file regolare
+esistente resta intatto salvo l'uso di `--force`; link simbolici e destinazioni non
+regolari vengono rifiutati anche con `--force`. La scrittura usa un file temporaneo
+nella directory di destinazione seguito da sostituzione atomica. Il contenuto PEM non
+viene mai stampato nel terminale o nei log.
 
 Per una verifica indipendente e facoltativa sui sistemi che dispongono di OpenSSL:
 

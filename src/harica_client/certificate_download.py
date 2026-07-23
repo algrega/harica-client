@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import os
 import re
 import ssl
 import stat
 import tempfile
+import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -60,6 +62,7 @@ class CertificateSummary:
     issuer: str
     not_before: str
     not_after: str
+    common_names: tuple[str, ...] = ()
 
 
 def extract_certificate_pem(response: Any) -> str:
@@ -89,6 +92,28 @@ def certificate_summary_from_pem(certificate_pem: str) -> CertificateSummary:
         raise HaricaConfigurationError(tr("download_certificate_invalid"))
     der = _decode_base64_der(match.group(1))
     return _parse_x509_der(der)
+
+
+def automatic_download_destination(summary: CertificateSummary) -> Path:
+    """Costruisce nella directory corrente un percorso sicuro da CN o seriale."""
+    filename = automatic_download_filename(summary)
+    try:
+        directory = Path.cwd()
+    except OSError as exc:
+        raise HaricaConfigurationError(
+            tr("download_current_directory_failed", error=exc)
+        ) from exc
+    return _absolute_path(directory / filename)
+
+
+def automatic_download_filename(summary: CertificateSummary) -> str:
+    """Restituisce un nome PEM sicuro e deterministico."""
+    common_name = _unique_common_name(summary.common_names)
+    source = common_name or summary.serial_number
+    stem = _safe_filename_stem(source, wildcard=common_name is not None)
+    if not _contains_ascii_alphanumeric(stem):
+        stem = _safe_filename_stem(summary.serial_number, wildcard=False)
+    return f"{stem}.pem"
 
 
 def validate_download_destination(
@@ -276,8 +301,16 @@ def _parse_x509_der(der: bytes) -> CertificateSummary:
         if offset > tbs_end:
             raise ValueError
 
-        issuer = _parse_name(der, issuer_start, issuer_end)
-        subject = _parse_name(der, subject_start, subject_end)
+        issuer, _issuer_common_names = _parse_name_details(
+            der,
+            issuer_start,
+            issuer_end,
+        )
+        subject, common_names = _parse_name_details(
+            der,
+            subject_start,
+            subject_end,
+        )
         not_before, not_after = _parse_validity(
             der,
             validity_start,
@@ -295,6 +328,7 @@ def _parse_x509_der(der: bytes) -> CertificateSummary:
             issuer=issuer,
             not_before=not_before,
             not_after=not_after,
+            common_names=common_names,
         )
     except (IndexError, ValueError, ssl.SSLError) as exc:
         raise HaricaConfigurationError(tr("download_certificate_invalid")) from exc
@@ -312,7 +346,17 @@ def _format_serial_number(value: bytes) -> str:
 
 
 def _parse_name(data: bytes, start: int, end: int) -> str:
+    name, _common_names = _parse_name_details(data, start, end)
+    return name
+
+
+def _parse_name_details(
+    data: bytes,
+    start: int,
+    end: int,
+) -> tuple[str, tuple[str, ...]]:
     rdns: list[str] = []
+    common_names: list[str] = []
     offset = start
     while offset < end:
         set_tag, set_start, set_end, offset = _read_tlv(data, offset)
@@ -345,13 +389,48 @@ def _parse_name(data: bytes, start: int, end: int) -> str:
                 value_tag,
                 data[value_start:value_end],
             )
+            if oid == "2.5.4.3":
+                common_names.append(value)
             attributes.append(f"{label}={_escape_distinguished_name_value(value)}")
         if attribute_offset != set_end or not attributes:
             raise ValueError
         rdns.append("+".join(attributes))
     if offset != end:
         raise ValueError
-    return ", ".join(rdns)
+    return ", ".join(rdns), tuple(common_names)
+
+
+def _unique_common_name(values: Sequence[str]) -> str | None:
+    unique: dict[str, str] = {}
+    for value in values:
+        normalized = unicodedata.normalize("NFKC", value).strip()
+        if normalized:
+            unique.setdefault(normalized, normalized)
+    if len(unique) > 1:
+        raise HaricaConfigurationError(tr("download_common_name_ambiguous"))
+    return next(iter(unique.values()), None)
+
+
+def _safe_filename_stem(value: str, *, wildcard: bool) -> str:
+    normalized = unicodedata.normalize("NFKC", value).strip()
+    if wildcard and normalized.startswith("*."):
+        normalized = f"wildcard.{normalized[2:]}"
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", normalized)
+    safe = safe.strip(".")
+    if safe in {"", ".", ".."}:
+        return ""
+    if len(safe) > 200:
+        digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:12]
+        prefix = safe[:187].rstrip(".")
+        safe = f"{prefix}-{digest}"
+    return safe
+
+
+def _contains_ascii_alphanumeric(value: str) -> bool:
+    return any(
+        character.isascii() and character.isalnum()
+        for character in value
+    )
 
 
 def _decode_oid(value: bytes) -> str:

@@ -24,7 +24,7 @@ rate limiting.
 - `production`, `staging`, and `development` environments;
 - listing `valid`, `revoked`, `expired`, or all certificates;
 - certificate lookup by serial number;
-- download of the final certificate by serial number in PEM format;
+- download of the final certificate to an automatic CN-based PEM filename;
 - local filtering by FQDN, `friendlyName`, and email address;
 - optional local JSON cache for repeated offline filtering;
 - retries for `429`, `502`, `503`, and `504` with exponential backoff and jitter;
@@ -201,6 +201,7 @@ harica-client list --status all --csv all-certificates.csv
 harica-client list --status expired --environment staging
 harica-client serial 'SERIAL-NUMBER' --json
 harica-client serial 'SERIAL-NUMBER' --csv certificate.csv
+harica-client download 'SERIAL-NUMBER'
 harica-client download 'SERIAL-NUMBER' --output certificate.pem
 ```
 
@@ -318,7 +319,10 @@ are mutually exclusive.
 Download the final X.509 certificate returned by the serial lookup:
 
 ```bash
-harica-client download 'SERIAL-NUMBER' --output certificate.pem
+harica-client download 'SERIAL-NUMBER'
+# saves ./portal.example.org.pem
+
+harica-client download 'SERIAL-NUMBER' --output custom-name.pem
 ```
 
 After saving the file, the command always prints a human-readable summary:
@@ -338,6 +342,12 @@ It confirms that the file is a readable X.509 certificate, but does not verify i
 trust chain, revocation status, hostname, or current temporal validity.
 The summary is human-readable output and is not a stable machine-data format.
 
+Without `--output`, the filename is built from the certificate subject CN and saved in
+the current directory. Wildcard CNs such as `*.example.org` become
+`wildcard.example.org.pem`; unsafe filesystem characters are replaced. If there is no
+usable CN, the certificate serial number is used. Multiple different CN values require
+an explicit `--output`.
+
 `download` always performs a live, point lookup and therefore requires an API key. It
 does not use the local cache, which deliberately excludes certificate contents. The
 command accepts the same connection options as `serial`, including `--environment`,
@@ -348,10 +358,11 @@ concatenated certificates, and malformed values are rejected. HARICA may return 
 base64-encoded DER; the saved file is normalized to PEM with LF line endings, a final
 newline, and mode `0644`.
 
-The destination name is always explicit. An existing regular file is preserved unless
-`--force` is supplied; symbolic links and non-regular destinations are rejected even
-with `--force`. Writes use a temporary file in the destination directory followed by an
-atomic replacement. The PEM contents are never printed to the terminal or logs.
+Use `--output` to choose a different name or directory. An existing regular file is
+preserved unless `--force` is supplied; symbolic links and non-regular destinations are
+rejected even with `--force`. Writes use a temporary file in the destination directory
+followed by an atomic replacement. The PEM contents are never printed to the terminal
+or logs.
 
 For an independent, optional check on a system that provides OpenSSL:
 
