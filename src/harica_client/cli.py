@@ -17,6 +17,7 @@ from typing import Any
 
 from . import __version__
 from .cache import (
+    CacheSnapshot,
     cache_age_hours,
     delete_cache,
     read_cache,
@@ -29,6 +30,13 @@ from .certificate_download import (
     extract_certificate_pem,
     validate_download_destination,
     write_certificate_pem,
+)
+from .certificate_stats import (
+    expirations_report,
+    owners_report,
+    quality_report,
+    summary_report,
+    summary_rows,
 )
 from .client import Environment, HaricaClient, RetryPolicy
 from .credentials import (
@@ -83,6 +91,45 @@ _EMAIL_FIELDS = frozenset(
         "useremailaddress",
     }
 )
+_SUMMARY_METRIC_LABELS = {
+    "cache.createdAt": "stats_metric_cache_created_at",
+    "cache.ageHours": "stats_metric_cache_age",
+    "cache.environment": "stats_metric_cache_environment",
+    "cache.baseUrl": "stats_metric_cache_source",
+    "total": "stats_metric_total",
+    "status.valid": "stats_metric_valid",
+    "status.revoked": "stats_metric_revoked",
+    "status.expired": "stats_metric_expired",
+    "status.unknown": "stats_metric_unknown",
+    "expiry.days0To7": "stats_metric_expiry_0_7",
+    "expiry.days8To30": "stats_metric_expiry_8_30",
+    "expiry.days31To60": "stats_metric_expiry_31_60",
+    "expiry.days61To90": "stats_metric_expiry_61_90",
+    "expiry.over90Days": "stats_metric_expiry_over_90",
+    "revokedLast30Days": "stats_metric_revoked_30",
+    "missingUser": "stats_metric_missing_user",
+    "missingUserEmail": "stats_metric_missing_email",
+    "missingCN": "stats_metric_missing_cn",
+    "invalidDates": "stats_metric_invalid_dates",
+}
+_STATS_COLUMN_LABELS = {
+    "metric": "stats_column_metric",
+    "value": "stats_column_value",
+    "serial": "stats_column_serial",
+    "CN": "stats_column_cn",
+    "friendlyName": "stats_column_friendly_name",
+    "userEmail": "stats_column_email",
+    "user": "stats_column_user",
+    "validTo": "stats_column_valid_to",
+    "daysRemaining": "stats_column_days_remaining",
+    "total": "stats_column_total",
+    "valid": "stats_column_valid",
+    "revoked": "stats_column_revoked",
+    "expired": "stats_column_expired",
+    "unknown": "stats_column_unknown",
+    "expiringWithin30Days": "stats_column_expiring_30",
+    "issue": "stats_column_issue",
+}
 
 
 def _terminal_text(value: Any) -> str:
@@ -218,6 +265,17 @@ def _add_cache_location_arguments(parser: argparse.ArgumentParser) -> None:
         type=Path,
         help=tr("help_cache_file"),
     )
+
+
+def _add_stats_arguments(parser: argparse.ArgumentParser) -> None:
+    _add_cache_location_arguments(parser)
+    parser.add_argument(
+        "--max-cache-age",
+        metavar="HOURS",
+        type=float,
+        help=tr("help_max_cache_age"),
+    )
+    _add_output_arguments(parser)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -409,6 +467,52 @@ def build_parser() -> argparse.ArgumentParser:
     )
     cache_delete_parser.set_defaults(handler=_run_cache_delete)
 
+    stats_parser = subparsers.add_parser("stats", help=tr("help_stats"))
+    _add_language_argument(stats_parser)
+    stats_subparsers = stats_parser.add_subparsers(
+        dest="stats_command",
+        required=True,
+    )
+
+    stats_summary_parser = stats_subparsers.add_parser(
+        "summary",
+        help=tr("help_stats_summary"),
+    )
+    _add_language_argument(stats_summary_parser)
+    _add_stats_arguments(stats_summary_parser)
+    stats_summary_parser.set_defaults(handler=_run_stats_summary)
+
+    stats_expirations_parser = stats_subparsers.add_parser(
+        "expirations",
+        help=tr("help_stats_expirations"),
+    )
+    _add_language_argument(stats_expirations_parser)
+    _add_stats_arguments(stats_expirations_parser)
+    stats_expirations_parser.add_argument(
+        "--within",
+        metavar="DAYS",
+        type=int,
+        default=30,
+        help=tr("help_stats_within"),
+    )
+    stats_expirations_parser.set_defaults(handler=_run_stats_expirations)
+
+    stats_owners_parser = stats_subparsers.add_parser(
+        "owners",
+        help=tr("help_stats_owners"),
+    )
+    _add_language_argument(stats_owners_parser)
+    _add_stats_arguments(stats_owners_parser)
+    stats_owners_parser.set_defaults(handler=_run_stats_owners)
+
+    stats_quality_parser = stats_subparsers.add_parser(
+        "quality",
+        help=tr("help_stats_quality"),
+    )
+    _add_language_argument(stats_quality_parser)
+    _add_stats_arguments(stats_quality_parser)
+    stats_quality_parser.set_defaults(handler=_run_stats_quality)
+
     return parser
 
 
@@ -562,6 +666,140 @@ def _run_cache_delete(args: argparse.Namespace) -> int:
         tr("cache_deleted", environment=args.environment, path=deleted)
     )
     return 0
+
+
+def _stats_snapshot(args: argparse.Namespace) -> CacheSnapshot:
+    target = resolve_cache_path(
+        args.environment,
+        explicit_path=args.cache_file,
+    )
+    return read_cache(
+        target,
+        expected_environment=args.environment,
+        max_age_hours=args.max_cache_age,
+    )
+
+
+def _run_stats_summary(args: argparse.Namespace) -> int:
+    report = summary_report(_stats_snapshot(args))
+    rows = summary_rows(report)
+    display_rows = [
+        {
+            "metric": tr(_SUMMARY_METRIC_LABELS[row["metric"]]),
+            "value": row["value"],
+        }
+        for row in rows
+    ]
+    _render_stats(
+        args,
+        json_data=report,
+        csv_rows=rows,
+        table_rows=display_rows,
+        columns=("metric", "value"),
+    )
+    return 0
+
+
+def _run_stats_expirations(args: argparse.Namespace) -> int:
+    if args.within <= 0:
+        raise HaricaConfigurationError(tr("stats_within_positive"))
+    snapshot = _stats_snapshot(args)
+    report = expirations_report(
+        snapshot.certificates,
+        within_days=args.within,
+    )
+    rows = report["certificates"]
+    _render_stats(
+        args,
+        json_data=report,
+        csv_rows=rows,
+        table_rows=rows,
+        columns=(
+            "serial",
+            "CN",
+            "friendlyName",
+            "userEmail",
+            "validTo",
+            "daysRemaining",
+        ),
+    )
+    skipped = report["skippedInvalidDates"]
+    if skipped:
+        _print_terminal(
+            tr("stats_expirations_skipped", count=skipped),
+            file=sys.stderr,
+        )
+    return 0
+
+
+def _run_stats_owners(args: argparse.Namespace) -> int:
+    rows = owners_report(_stats_snapshot(args).certificates)
+    display_rows = [
+        {
+            **row,
+            "userEmail": row["userEmail"] or tr("stats_missing_owner"),
+            "user": row["user"] or tr("stats_missing_owner"),
+        }
+        for row in rows
+    ]
+    _render_stats(
+        args,
+        json_data=rows,
+        csv_rows=rows,
+        table_rows=display_rows,
+        columns=(
+            "userEmail",
+            "user",
+            "total",
+            "valid",
+            "revoked",
+            "expired",
+            "unknown",
+            "expiringWithin30Days",
+        ),
+    )
+    return 0
+
+
+def _run_stats_quality(args: argparse.Namespace) -> int:
+    rows = quality_report(_stats_snapshot(args).certificates)
+    _render_stats(
+        args,
+        json_data=rows,
+        csv_rows=rows,
+        table_rows=rows,
+        columns=("serial", "CN", "friendlyName", "issue"),
+    )
+    return 0
+
+
+def _render_stats(
+    args: argparse.Namespace,
+    *,
+    json_data: Any,
+    csv_rows: Sequence[Mapping[str, Any]],
+    table_rows: Sequence[Mapping[str, Any]],
+    columns: Sequence[str],
+) -> None:
+    if args.csv is not None:
+        row_count = _write_csv(
+            csv_rows,
+            args.csv,
+            force=args.force,
+            fieldnames=columns,
+        )
+        _print_terminal(
+            tr(
+                "rows_exported",
+                count=row_count,
+                path=args.csv.expanduser().resolve(),
+            )
+        )
+        return
+    if args.json:
+        print(json.dumps(json_data, ensure_ascii=False, indent=2, sort_keys=True))
+        return
+    _print_stats_table(table_rows, columns)
 
 
 def _run_serial(args: argparse.Namespace) -> int:
@@ -839,7 +1077,13 @@ def _extract_rows(data: Any) -> list[Any]:
     return [data]
 
 
-def _write_csv(data: Any, destination: Path, *, force: bool = False) -> int:
+def _write_csv(
+    data: Any,
+    destination: Path,
+    *,
+    force: bool = False,
+    fieldnames: Sequence[str] | None = None,
+) -> int:
     rows = _extract_rows(data)
     if not all(isinstance(row, Mapping) for row in rows):
         raise HaricaConfigurationError(tr("csv_not_rows"))
@@ -847,7 +1091,11 @@ def _write_csv(data: Any, destination: Path, *, force: bool = False) -> int:
     target = destination.expanduser().resolve()
     if target.exists() and not force:
         raise HaricaConfigurationError(tr("csv_exists", path=target))
-    fieldnames = _csv_fieldnames(rows)
+    selected_fieldnames = (
+        [str(field) for field in fieldnames]
+        if fieldnames is not None
+        else _csv_fieldnames(rows)
+    )
     temporary_path: Path | None = None
 
     try:
@@ -862,12 +1110,19 @@ def _write_csv(data: Any, destination: Path, *, force: bool = False) -> int:
             delete=False,
         ) as stream:
             temporary_path = Path(stream.name)
-            if fieldnames:
-                writer = csv.DictWriter(stream, fieldnames=fieldnames, extrasaction="ignore")
+            if selected_fieldnames:
+                writer = csv.DictWriter(
+                    stream,
+                    fieldnames=selected_fieldnames,
+                    extrasaction="ignore",
+                )
                 writer.writeheader()
                 for row in rows:
                     writer.writerow(
-                        {field: _csv_cell(row.get(field)) for field in fieldnames}
+                        {
+                            field: _csv_cell(row.get(field))
+                            for field in selected_fieldnames
+                        }
                     )
         os.replace(temporary_path, target)
     except OSError as exc:
@@ -942,6 +1197,37 @@ def _print_table(rows: Sequence[Mapping[str, Any]]) -> None:
     print(
         "  ".join(
             column.ljust(widths[index]) for index, column in enumerate(safe_columns)
+        )
+    )
+    print("  ".join("-" * width for width in widths))
+    for row in rendered:
+        print(
+            "  ".join(
+                row[index][: widths[index]].ljust(widths[index])
+                for index in range(len(columns))
+            )
+        )
+
+
+def _print_stats_table(
+    rows: Sequence[Mapping[str, Any]],
+    columns: Sequence[str],
+) -> None:
+    if not rows:
+        _print_terminal(tr("no_results"))
+        return
+    headers = [
+        _terminal_text(tr(_STATS_COLUMN_LABELS.get(column, column)))
+        for column in columns
+    ]
+    rendered = [[_cell(row.get(column)) for column in columns] for row in rows]
+    widths = [
+        min(48, max(len(header), *(len(row[index]) for row in rendered)))
+        for index, header in enumerate(headers)
+    ]
+    print(
+        "  ".join(
+            header.ljust(widths[index]) for index, header in enumerate(headers)
         )
     )
     print("  ".join("-" * width for width in widths))

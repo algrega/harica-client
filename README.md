@@ -27,6 +27,7 @@ rate limiting.
 - download of the final certificate to an automatic CN-based PEM filename;
 - local filtering by FQDN, `friendlyName`, and email address;
 - optional local JSON cache for repeated offline filtering;
+- cache-only summaries, expiration reports, owner breakdowns, and data-quality checks;
 - retries for `429`, `502`, `503`, and `504` with exponential backoff and jitter;
 - HTTPS enforcement and fail-closed handling of authenticated redirects;
 - support for `Retry-After` as seconds or an HTTP date;
@@ -176,6 +177,7 @@ HARICA_CLIENT_CACHE_FILE=/home/harica/.cache/harica-client/certificates/producti
 
 30 5 * * * /bin/sh -c 'umask 077; exec harica-client cache refresh --environment production' >> /home/harica/log/harica-client.log 2>&1
 0 6 * * * /bin/sh -c 'umask 077; exec harica-client list --from-cache --max-cache-age 24 --status valid --csv /home/harica/exports/valid-certificates.csv --force' >> /home/harica/log/harica-client.log 2>&1
+15 6 * * * /bin/sh -c 'umask 077; exec harica-client stats expirations --max-cache-age 24 --within 30 --csv /home/harica/exports/upcoming-expirations.csv --force' >> /home/harica/log/harica-client.log 2>&1
 ```
 
 If the refresh fails, the previous valid snapshot remains. The export job fails instead
@@ -203,6 +205,10 @@ harica-client serial 'SERIAL-NUMBER' --json
 harica-client serial 'SERIAL-NUMBER' --csv certificate.csv
 harica-client download 'SERIAL-NUMBER'
 harica-client download 'SERIAL-NUMBER' --output certificate.pem
+harica-client stats summary
+harica-client stats expirations --within 30
+harica-client stats owners
+harica-client stats quality
 ```
 
 ### Listing every status
@@ -265,6 +271,67 @@ Remove it explicitly with:
 harica-client cache delete --environment production
 harica-client cache delete --environment production --yes
 ```
+
+### Cache-based statistics
+
+The `stats` command analyzes only the selected local cache. It never loads an API key,
+creates an HTTP client, contacts HARICA, or falls back to the network. A missing, unsafe,
+invalid, incompatible, wrong-environment, or over-age cache causes the command to fail.
+Refresh the snapshot separately whenever current data is required:
+
+```bash
+harica-client cache refresh --environment production
+harica-client stats summary
+```
+
+The available reports are:
+
+```bash
+# Overall counts, expiration bands, recent revocations, and missing fields
+harica-client stats summary
+
+# Valid certificates expiring in the next 30 days; the default is 30
+harica-client stats expirations --within 30
+
+# Counts grouped by userEmail, with user as descriptive information
+harica-client stats owners
+
+# One row for every certificate/data-quality anomaly
+harica-client stats quality
+```
+
+`summary` includes cache date and age, status totals, exclusive expiration bands
+(`0–7`, `8–30`, `31–60`, `61–90`, and over 90 days), revocations during the previous
+30 days, and records missing owner, email, CN, or usable validity dates.
+`expirations` considers only `valid` certificates, sorts them by expiration and CN, and
+reports how many otherwise valid records were excluded because `validTo` was missing or
+invalid. `owners` uses a separate group for a missing email/owner. `quality` reports
+stable machine-readable issue codes for missing or invalid fields, reversed validity
+ranges, revocation inconsistencies, duplicate serials, missing CNs, and unknown statuses.
+
+Every report supports the same cache selection and age controls:
+
+```bash
+harica-client stats summary --environment staging
+harica-client stats summary --cache-file /srv/harica/cache.json
+harica-client stats summary --max-cache-age 24
+```
+
+The path precedence remains `--cache-file`, `HARICA_CLIENT_CACHE_FILE`, then the
+environment-specific default path. Output is a localized table by default. JSON keys,
+CSV headers, and quality issue codes are stable and identical in Italian and English:
+
+```bash
+harica-client stats summary --json
+harica-client stats expirations --within 60 --json
+harica-client stats owners --csv certificate-owners.csv
+harica-client stats quality --csv certificate-quality.csv --force
+```
+
+Statistics describe only the selected snapshot and are not authoritative real-time
+HARICA data. No history or comparison between refreshes is retained. JSON and CSV
+exports may contain sensitive hostnames, personal names, and email addresses; protect
+them like the cache and keep them out of repositories and shared directories.
 
 ### Filtering by FQDN, friendlyName, and email
 

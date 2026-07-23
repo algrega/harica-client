@@ -38,7 +38,7 @@ class CliTests(unittest.TestCase):
         with redirect_stdout(output):
             code = main(["version"])
         self.assertEqual(code, 0)
-        self.assertEqual(output.getvalue().strip(), "0.16.0")
+        self.assertEqual(output.getvalue().strip(), "0.17.0")
 
     def test_extract_wrapped_rows(self) -> None:
         self.assertEqual(

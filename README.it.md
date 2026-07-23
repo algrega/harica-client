@@ -27,6 +27,7 @@ rate limit HTTP 429.
 - download del certificato finale con nome PEM automatico derivato dal CN;
 - ricerca locale per FQDN, `friendlyName` e indirizzo email;
 - cache JSON locale opzionale per filtri offline ripetuti;
+- riepiloghi, scadenze, raggruppamenti e controlli qualità basati solo sulla cache;
 - retry di `429`, `502`, `503` e `504` con backoff esponenziale e jitter;
 - HTTPS obbligatorio e gestione fail-closed dei redirect autenticati;
 - supporto a `Retry-After` sia in secondi sia come data HTTP;
@@ -186,6 +187,7 @@ HARICA_CLIENT_CACHE_FILE=/home/harica/.cache/harica-client/certificates/producti
 
 30 5 * * * /bin/sh -c 'umask 077; exec harica-client cache refresh --environment production' >> /home/harica/log/harica-client.log 2>&1
 0 6 * * * /bin/sh -c 'umask 077; exec harica-client list --from-cache --max-cache-age 24 --status valid --csv /home/harica/exports/certificati-validi.csv --force' >> /home/harica/log/harica-client.log 2>&1
+15 6 * * * /bin/sh -c 'umask 077; exec harica-client stats expirations --max-cache-age 24 --within 30 --csv /home/harica/exports/prossime-scadenze.csv --force' >> /home/harica/log/harica-client.log 2>&1
 ```
 
 Se l'aggiornamento fallisce, la fotografia precedente resta integra. Il job di export
@@ -214,6 +216,10 @@ harica-client serial 'NUMERO-SERIALE' --json
 harica-client serial 'NUMERO-SERIALE' --csv certificato.csv
 harica-client download 'NUMERO-SERIALE'
 harica-client download 'NUMERO-SERIALE' --output certificato.pem
+harica-client stats summary
+harica-client stats expirations --within 30
+harica-client stats owners
+harica-client stats quality
 ```
 
 ### Elenco completo di tutti gli stati
@@ -280,6 +286,69 @@ Per eliminarla esplicitamente:
 harica-client cache delete --environment production
 harica-client cache delete --environment production --yes
 ```
+
+### Statistiche basate sulla cache
+
+Il comando `stats` analizza esclusivamente la cache locale selezionata. Non carica la
+API key, non crea il client HTTP, non contatta HARICA e non esegue fallback verso la
+rete. Una cache assente, non sicura, non valida, incompatibile, appartenente a un altro
+ambiente o troppo vecchia causa un errore. Quando servono dati aggiornati, aggiorna
+separatamente la fotografia:
+
+```bash
+harica-client cache refresh --environment production
+harica-client stats summary
+```
+
+I report disponibili sono:
+
+```bash
+# Conteggi generali, fasce di scadenza, revoche recenti e campi mancanti
+harica-client stats summary
+
+# Certificati validi in scadenza entro 30 giorni; il default è 30
+harica-client stats expirations --within 30
+
+# Conteggi raggruppati per userEmail, con user come informazione descrittiva
+harica-client stats owners
+
+# Una riga per ogni certificato e anomalia dei dati
+harica-client stats quality
+```
+
+`summary` include data ed età della cache, totali per stato, fasce di scadenza esclusive
+(`0–7`, `8–30`, `31–60`, `61–90` e oltre 90 giorni), revoche negli ultimi 30 giorni e
+record privi di responsabile, email, CN o date di validità utilizzabili.
+`expirations` considera solo i certificati `valid`, li ordina per scadenza e CN e segnala
+quanti record validi sono stati esclusi perché `validTo` è assente o non valida.
+`owners` usa un gruppo separato quando email o responsabile mancano. `quality` espone
+codici stabili per campi mancanti o non validi, intervalli temporali invertiti,
+incoerenze di revoca, seriali duplicati, CN mancanti e stati sconosciuti.
+
+Ogni report supporta la selezione e il limite di età della cache:
+
+```bash
+harica-client stats summary --environment staging
+harica-client stats summary --cache-file /srv/harica/cache.json
+harica-client stats summary --max-cache-age 24
+```
+
+La precedenza del percorso resta `--cache-file`, `HARICA_CLIENT_CACHE_FILE`, quindi il
+percorso predefinito dell'ambiente. L'output predefinito è una tabella localizzata.
+Chiavi JSON, intestazioni CSV e codici delle anomalie restano stabili e identici tra
+italiano e inglese:
+
+```bash
+harica-client stats summary --json
+harica-client stats expirations --within 60 --json
+harica-client stats owners --csv responsabili-certificati.csv
+harica-client stats quality --csv qualita-certificati.csv --force
+```
+
+Le statistiche descrivono soltanto la fotografia selezionata e non sono dati HARICA
+autoritativi in tempo reale. Non vengono conservati storico o confronti tra refresh.
+Gli export JSON e CSV possono contenere hostname, nomi personali e indirizzi email
+sensibili: proteggili come la cache e non salvarli in repository o directory condivise.
 
 ### Ricerca per FQDN, friendlyName ed email
 
