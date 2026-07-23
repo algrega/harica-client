@@ -368,8 +368,25 @@ Per scaricare il certificato X.509 finale restituito dalla ricerca per seriale:
 
 ```bash
 harica-client download 'NUMERO-SERIALE' --output certificato.pem
-openssl x509 -in certificato.pem -noout -serial -subject -issuer -dates
 ```
+
+Dopo il salvataggio, il comando mostra sempre un riepilogo leggibile:
+
+```text
+Percorso: /percorso/assoluto/certificato.pem
+Seriale: 1234AB
+Soggetto: C=IT, O=Example, CN=portal.example.org
+Emittente: C=GR, O=HARICA, CN=...
+Valido dal: 2026-07-23T08:26:40Z
+Valido fino al: 2027-07-23T08:26:39Z
+```
+
+Il riepilogo viene estratto internamente usando soltanto la libreria standard Python.
+Le date sono normalizzate in ISO 8601 UTC e i distinguished name usano un formato
+compatto e deterministico. Il controllo conferma che il file sia un certificato X.509
+leggibile, ma non verifica chain di fiducia, revoca, hostname o validità temporale
+corrente.
+Il riepilogo è destinato alla lettura umana e non è un formato dati stabile per script.
 
 `download` esegue sempre una ricerca puntuale in rete e richiede quindi la API key. Non
 usa la cache locale, che esclude intenzionalmente il contenuto dei certificati. Il
@@ -386,6 +403,12 @@ intatto salvo l'uso di `--force`; link simbolici e destinazioni non regolari ven
 rifiutati anche con `--force`. La scrittura usa un file temporaneo nella directory di
 destinazione seguito da sostituzione atomica. Il contenuto PEM non viene mai stampato
 nel terminale o nei log.
+
+Per una verifica indipendente e facoltativa sui sistemi che dispongono di OpenSSL:
+
+```bash
+openssl x509 -in certificato.pem -noout -serial -subject -issuer -dates
+```
 
 Gli ambienti predefiniti sono:
 

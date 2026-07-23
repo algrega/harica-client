@@ -11,6 +11,10 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from harica_client.certificate_download import (
+    CertificateSummary,
+    _parse_asn1_time,
+    _parse_name,
+    certificate_summary_from_pem,
     extract_certificate_pem,
     validate_download_destination,
     write_certificate_pem,
@@ -39,6 +43,15 @@ Ly1o9MSbR/4I5zcq4SWO/p2ERrib3c6vNxwq4ZTLKsqYhZBW8hu8tgmdfczkuNu9
 GiCvi59u7JjDeFD1Z0VBjEI=
 -----END CERTIFICATE-----
 """
+
+
+def _tlv(tag: int, value: bytes) -> bytes:
+    if len(value) < 128:
+        length = bytes((len(value),))
+    else:
+        encoded_length = len(value).to_bytes((len(value).bit_length() + 7) // 8, "big")
+        length = bytes((0x80 | len(encoded_length),)) + encoded_length
+    return bytes((tag,)) + length + value
 
 
 class CertificateExtractionTests(unittest.TestCase):
@@ -103,6 +116,63 @@ class CertificateExtractionTests(unittest.TestCase):
             extract_certificate_pem({"certificate": secret_fragment})
         self.assertNotIn(secret_fragment, str(caught.exception))
 
+    def test_extracts_stable_summary_from_certificate(self) -> None:
+        summary = certificate_summary_from_pem(CERTIFICATE_PEM)
+
+        self.assertEqual(
+            summary,
+            CertificateSummary(
+                serial_number="54B4F99B80D2906EF73A6D436E6D04F2ED314D73",
+                subject="CN=example.org",
+                issuer="CN=example.org",
+                not_before="2026-07-23T08:26:40Z",
+                not_after="2026-07-24T08:26:40Z",
+            ),
+        )
+
+    def test_expired_certificate_is_parsed_without_date_rejection(self) -> None:
+        der = ssl.PEM_cert_to_DER_cert(CERTIFICATE_PEM)
+        der = der.replace(b"260723082640Z", b"200723082640Z")
+        der = der.replace(b"260724082640Z", b"200724082640Z")
+        expired_pem = ssl.DER_cert_to_PEM_cert(der)
+
+        summary = certificate_summary_from_pem(expired_pem)
+
+        self.assertEqual(summary.not_before, "2020-07-23T08:26:40Z")
+        self.assertEqual(summary.not_after, "2020-07-24T08:26:40Z")
+
+    def test_name_supports_utf8_unknown_oid_multivalue_and_escaping(self) -> None:
+        common_name = _tlv(0x06, b"\x55\x04\x03") + _tlv(
+            0x0C,
+            " Portale, città ".encode(),
+        )
+        unknown = _tlv(0x06, b"\x2A\x03\x04") + _tlv(
+            0x0C,
+            b"custom+value",
+        )
+        name = _tlv(0x31, _tlv(0x30, common_name) + _tlv(0x30, unknown))
+
+        self.assertEqual(
+            _parse_name(name, 0, len(name)),
+            r"CN=\ Portale\, città\ +1.2.3.4=custom\+value",
+        )
+
+    def test_unknown_directory_string_is_rendered_as_hex(self) -> None:
+        attribute = _tlv(0x06, b"\x55\x04\x03") + _tlv(0x04, b"\x00\xFF")
+        name = _tlv(0x31, _tlv(0x30, attribute))
+
+        self.assertEqual(_parse_name(name, 0, len(name)), r"CN=\#00FF")
+
+    def test_utc_and_generalized_times_are_normalized_to_utc(self) -> None:
+        self.assertEqual(
+            _parse_asn1_time(0x17, b"500101000000Z"),
+            "1950-01-01T00:00:00Z",
+        )
+        self.assertEqual(
+            _parse_asn1_time(0x18, b"20510102030405+0100"),
+            "2051-01-02T02:04:05Z",
+        )
+
 
 class CertificateDestinationTests(unittest.TestCase):
     def test_writes_atomically_creates_directories_and_sets_mode_0644(self) -> None:
@@ -159,11 +229,11 @@ class CertificateDestinationTests(unittest.TestCase):
 
 
 class DownloadCliTests(unittest.TestCase):
-    def test_download_saves_only_path_and_does_not_print_pem_or_api_key(self) -> None:
+    def test_download_saves_file_and_prints_italian_summary_without_secrets(self) -> None:
         api_key = "test-api-key-never-print"
         client = Mock()
         client.certificate_by_serial.return_value = {
-            "data": {"Certificate": CERTIFICATE_PEM}
+            "data": {"Certificate": CERTIFICATE_PEM, "status": "revoked"}
         }
         output = io.StringIO()
         errors = io.StringIO()
@@ -182,6 +252,8 @@ class DownloadCliTests(unittest.TestCase):
                         "AA BB/01",
                         "--output",
                         str(target),
+                        "--language",
+                        "it",
                     ]
                 )
 
@@ -190,9 +262,49 @@ class DownloadCliTests(unittest.TestCase):
         rendered = output.getvalue() + errors.getvalue()
         self.assertEqual(code, 0)
         client.certificate_by_serial.assert_called_once_with("AA BB/01")
-        self.assertEqual(rendered.strip(), str(target))
+        self.assertEqual(
+            rendered.strip().splitlines(),
+            [
+                f"Percorso: {target}",
+                "Seriale: 54B4F99B80D2906EF73A6D436E6D04F2ED314D73",
+                "Soggetto: CN=example.org",
+                "Emittente: CN=example.org",
+                "Valido dal: 2026-07-23T08:26:40Z",
+                "Valido fino al: 2026-07-24T08:26:40Z",
+            ],
+        )
         self.assertNotIn("BEGIN CERTIFICATE", rendered)
         self.assertNotIn(api_key, rendered)
+
+    def test_download_summary_is_localized_in_english(self) -> None:
+        client = Mock()
+        client.certificate_by_serial.return_value = {"certificate": CERTIFICATE_PEM}
+        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "certificate.pem"
+            with (
+                patch("harica_client.cli._client_from_args", return_value=client),
+                redirect_stdout(output),
+                redirect_stderr(io.StringIO()),
+            ):
+                code = main(
+                    [
+                        "download",
+                        "01",
+                        "--output",
+                        str(target),
+                        "--language",
+                        "en",
+                    ]
+                )
+
+        self.assertEqual(code, 0)
+        self.assertIn(f"Path: {target}", output.getvalue())
+        self.assertIn("Serial: 54B4F99B80D2906EF73A6D436E6D04F2ED314D73", output.getvalue())
+        self.assertIn("Subject: CN=example.org", output.getvalue())
+        self.assertIn("Issuer: CN=example.org", output.getvalue())
+        self.assertIn("Valid from: 2026-07-23T08:26:40Z", output.getvalue())
+        self.assertIn("Valid until: 2026-07-24T08:26:40Z", output.getvalue())
 
     def test_existing_destination_is_rejected_before_creating_client(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -237,6 +349,69 @@ class DownloadCliTests(unittest.TestCase):
 
             self.assertEqual(code, 1)
             self.assertEqual(target.read_text(encoding="ascii"), "old")
+
+    def test_summary_error_with_force_preserves_existing_file(self) -> None:
+        client = Mock()
+        client.certificate_by_serial.return_value = {"certificate": CERTIFICATE_PEM}
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "certificate.pem"
+            target.write_text("old", encoding="ascii")
+
+            with (
+                patch("harica_client.cli._client_from_args", return_value=client),
+                patch(
+                    "harica_client.cli.certificate_summary_from_pem",
+                    side_effect=HaricaConfigurationError("simulated summary failure"),
+                ),
+                redirect_stdout(io.StringIO()),
+                redirect_stderr(io.StringIO()),
+            ):
+                code = main(
+                    [
+                        "download",
+                        "01",
+                        "--output",
+                        str(target),
+                        "--force",
+                    ]
+                )
+
+            self.assertEqual(code, 1)
+            self.assertEqual(target.read_text(encoding="ascii"), "old")
+
+    def test_summary_neutralizes_terminal_controls(self) -> None:
+        client = Mock()
+        client.certificate_by_serial.return_value = {"certificate": CERTIFICATE_PEM}
+        malicious = "CN=example.org\x1b[2J\x07\u202e"
+        summary = CertificateSummary(
+            serial_number="01",
+            subject=malicious,
+            issuer="CN=issuer",
+            not_before="2020-01-01T00:00:00Z",
+            not_after="2030-01-01T00:00:00Z",
+        )
+        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "certificate.pem"
+            with (
+                patch("harica_client.cli._client_from_args", return_value=client),
+                patch(
+                    "harica_client.cli.certificate_summary_from_pem",
+                    return_value=summary,
+                ),
+                redirect_stdout(output),
+                redirect_stderr(io.StringIO()),
+            ):
+                code = main(
+                    ["download", "01", "--output", str(target)]
+                )
+
+        rendered = output.getvalue()
+        self.assertEqual(code, 0)
+        self.assertNotIn("\x1b", rendered)
+        self.assertNotIn("\x07", rendered)
+        self.assertNotIn("\u202e", rendered)
+        self.assertIn(r"\x1b[2J\x07\u202e", rendered)
 
     def test_request_error_does_not_create_destination(self) -> None:
         client = Mock()

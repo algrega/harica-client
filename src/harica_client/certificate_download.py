@@ -10,6 +10,8 @@ import ssl
 import stat
 import tempfile
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +35,31 @@ _UNSUPPORTED_PEM_MARKERS = (
     "-----BEGIN CMS-----",
     "-----BEGIN PKCS12-----",
 )
+_OID_LABELS = {
+    "0.9.2342.19200300.100.1.25": "DC",
+    "1.2.840.113549.1.9.1": "emailAddress",
+    "2.5.4.3": "CN",
+    "2.5.4.5": "serialNumber",
+    "2.5.4.6": "C",
+    "2.5.4.7": "L",
+    "2.5.4.8": "ST",
+    "2.5.4.9": "street",
+    "2.5.4.10": "O",
+    "2.5.4.11": "OU",
+    "2.5.4.12": "title",
+    "2.5.4.17": "postalCode",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class CertificateSummary:
+    """Campi X.509 mostrati dopo un download riuscito."""
+
+    serial_number: str
+    subject: str
+    issuer: str
+    not_before: str
+    not_after: str
 
 
 def extract_certificate_pem(response: Any) -> str:
@@ -53,6 +80,15 @@ def extract_certificate_pem(response: Any) -> str:
     if len(normalized) != 1:
         raise HaricaConfigurationError(tr("download_certificate_ambiguous"))
     return normalized.pop()
+
+
+def certificate_summary_from_pem(certificate_pem: str) -> CertificateSummary:
+    """Estrae il riepilogo da un singolo PEM già normalizzato."""
+    match = _PEM_CERTIFICATE.fullmatch(certificate_pem.strip())
+    if match is None:
+        raise HaricaConfigurationError(tr("download_certificate_invalid"))
+    der = _decode_base64_der(match.group(1))
+    return _parse_x509_der(der)
 
 
 def validate_download_destination(
@@ -179,7 +215,7 @@ def _normalize_certificate(value: str) -> str:
             raise HaricaConfigurationError(tr("download_certificate_invalid"))
         der = _decode_base64_der(match.group(1))
 
-    _validate_x509_der(der)
+    _parse_x509_der(der)
     return f"{ssl.DER_cert_to_PEM_cert(der).strip()}\n"
 
 
@@ -193,8 +229,8 @@ def _decode_base64_der(value: str) -> bytes:
         raise HaricaConfigurationError(tr("download_certificate_invalid")) from exc
 
 
-def _validate_x509_der(der: bytes) -> None:
-    """Valida la struttura ASN.1 esterna e i campi obbligatori di Certificate."""
+def _parse_x509_der(der: bytes) -> CertificateSummary:
+    """Valida Certificate e restituisce i campi obbligatori del TBSCertificate."""
     try:
         root_tag, root_start, root_end, next_offset = _read_tlv(der, 0)
         if root_tag != 0x30 or next_offset != len(der):
@@ -221,23 +257,214 @@ def _validate_x509_der(der: bytes) -> None:
             first_tag, _start, _end, next_field = _read_tlv(der, offset)
         if first_tag != 0x02:
             raise ValueError
+        serial_number = _format_serial_number(der[_start:_end])
         offset = next_field
 
-        # signature, issuer, validity, subject e subjectPublicKeyInfo.
-        for expected_tag in (0x30, 0x30, 0x30, 0x30, 0x30):
-            actual_tag, _start, _end, offset = _read_tlv(der, offset)
-            if actual_tag != expected_tag:
-                raise ValueError
+        signature_tag, _start, _end, offset = _read_tlv(der, offset)
+        issuer_tag, issuer_start, issuer_end, offset = _read_tlv(der, offset)
+        validity_tag, validity_start, validity_end, offset = _read_tlv(der, offset)
+        subject_tag, subject_start, subject_end, offset = _read_tlv(der, offset)
+        public_key_tag, _start, _end, offset = _read_tlv(der, offset)
+        if (
+            signature_tag != 0x30
+            or issuer_tag != 0x30
+            or validity_tag != 0x30
+            or subject_tag != 0x30
+            or public_key_tag != 0x30
+        ):
+            raise ValueError
         if offset > tbs_end:
             raise ValueError
+
+        issuer = _parse_name(der, issuer_start, issuer_end)
+        subject = _parse_name(der, subject_start, subject_end)
+        not_before, not_after = _parse_validity(
+            der,
+            validity_start,
+            validity_end,
+        )
 
         # Delega a OpenSSL il parsing completo del certificato senza verificarne
         # attendibilità, stato o date: devono essere scaricabili anche revocati
         # e scaduti.
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         context.load_verify_locations(cadata=der)
+        return CertificateSummary(
+            serial_number=serial_number,
+            subject=subject,
+            issuer=issuer,
+            not_before=not_before,
+            not_after=not_after,
+        )
     except (IndexError, ValueError, ssl.SSLError) as exc:
         raise HaricaConfigurationError(tr("download_certificate_invalid")) from exc
+
+
+def _format_serial_number(value: bytes) -> str:
+    if not value:
+        raise ValueError
+    number = int.from_bytes(value, "big", signed=True)
+    if number < 0:
+        return f"-{-number:X}"
+    if number == 0:
+        return "00"
+    return f"{number:X}"
+
+
+def _parse_name(data: bytes, start: int, end: int) -> str:
+    rdns: list[str] = []
+    offset = start
+    while offset < end:
+        set_tag, set_start, set_end, offset = _read_tlv(data, offset)
+        if set_tag != 0x31:
+            raise ValueError
+        attributes: list[str] = []
+        attribute_offset = set_start
+        while attribute_offset < set_end:
+            sequence_tag, sequence_start, sequence_end, attribute_offset = _read_tlv(
+                data,
+                attribute_offset,
+            )
+            if sequence_tag != 0x30:
+                raise ValueError
+            oid_tag, oid_start, oid_end, value_offset = _read_tlv(
+                data,
+                sequence_start,
+            )
+            if oid_tag != 0x06:
+                raise ValueError
+            value_tag, value_start, value_end, value_offset = _read_tlv(
+                data,
+                value_offset,
+            )
+            if value_offset != sequence_end:
+                raise ValueError
+            oid = _decode_oid(data[oid_start:oid_end])
+            label = _OID_LABELS.get(oid, oid)
+            value = _decode_directory_string(
+                value_tag,
+                data[value_start:value_end],
+            )
+            attributes.append(f"{label}={_escape_distinguished_name_value(value)}")
+        if attribute_offset != set_end or not attributes:
+            raise ValueError
+        rdns.append("+".join(attributes))
+    if offset != end:
+        raise ValueError
+    return ", ".join(rdns)
+
+
+def _decode_oid(value: bytes) -> str:
+    if not value:
+        raise ValueError
+    subidentifiers: list[int] = []
+    current = 0
+    continued = False
+    for byte in value:
+        if not continued and byte == 0x80:
+            raise ValueError
+        current = (current << 7) | (byte & 0x7F)
+        continued = bool(byte & 0x80)
+        if not continued:
+            subidentifiers.append(current)
+            current = 0
+    if continued or not subidentifiers:
+        raise ValueError
+    first = subidentifiers[0]
+    first_arc = min(first // 40, 2)
+    arcs = [first_arc, first - (first_arc * 40), *subidentifiers[1:]]
+    return ".".join(str(arc) for arc in arcs)
+
+
+def _decode_directory_string(tag: int, value: bytes) -> str:
+    encodings = {
+        0x0C: "utf-8",
+        0x12: "ascii",
+        0x13: "ascii",
+        0x14: "latin-1",
+        0x16: "ascii",
+        0x1A: "ascii",
+        0x1B: "latin-1",
+        0x1C: "utf-32-be",
+        0x1E: "utf-16-be",
+    }
+    encoding = encodings.get(tag)
+    if encoding is None:
+        return f"#{value.hex().upper()}"
+    return value.decode(encoding)
+
+
+def _escape_distinguished_name_value(value: str) -> str:
+    escaped: list[str] = []
+    last_index = len(value) - 1
+    for index, character in enumerate(value):
+        if character in {",", "+", '"', "\\", "<", ">", ";", "="}:
+            escaped.append(f"\\{character}")
+        elif (index == 0 and character in {" ", "#"}) or (
+            index == last_index and character == " "
+        ):
+            escaped.append(f"\\{character}")
+        elif ord(character) < 0x20 or ord(character) == 0x7F:
+            escaped.extend(f"\\{byte:02X}" for byte in character.encode("utf-8"))
+        else:
+            escaped.append(character)
+    return "".join(escaped)
+
+
+def _parse_validity(data: bytes, start: int, end: int) -> tuple[str, str]:
+    first_tag, first_start, first_end, offset = _read_tlv(data, start)
+    second_tag, second_start, second_end, offset = _read_tlv(data, offset)
+    if offset != end:
+        raise ValueError
+    return (
+        _parse_asn1_time(first_tag, data[first_start:first_end]),
+        _parse_asn1_time(second_tag, data[second_start:second_end]),
+    )
+
+
+def _parse_asn1_time(tag: int, value: bytes) -> str:
+    text = value.decode("ascii")
+    if tag == 0x17:
+        match = re.fullmatch(r"(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})?(Z|[+-]\d{4})", text)
+        if match is None:
+            raise ValueError
+        short_year, month, day, hour, minute, second, zone = match.groups()
+        numeric_year = int(short_year)
+        year = 1900 + numeric_year if numeric_year >= 50 else 2000 + numeric_year
+        fraction = ""
+    elif tag == 0x18:
+        match = re.fullmatch(
+            r"(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:[.,](\d+))?(Z|[+-]\d{4})",
+            text,
+        )
+        if match is None:
+            raise ValueError
+        year, month, day, hour, minute, second, fraction, zone = match.groups()
+        year = int(year)
+    else:
+        raise ValueError
+
+    if zone == "Z":
+        selected_timezone = timezone.utc
+    else:
+        sign = 1 if zone[0] == "+" else -1
+        offset = timedelta(
+            hours=int(zone[1:3]),
+            minutes=int(zone[3:5]),
+        )
+        selected_timezone = timezone(sign * offset)
+    microsecond = int(((fraction or "") + "000000")[:6])
+    timestamp = datetime(
+        year,
+        int(month),
+        int(day),
+        int(hour),
+        int(minute),
+        int(second or 0),
+        microsecond,
+        tzinfo=selected_timezone,
+    ).astimezone(timezone.utc)
+    return timestamp.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _read_tlv(data: bytes, offset: int) -> tuple[int, int, int, int]:

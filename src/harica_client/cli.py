@@ -24,6 +24,7 @@ from .cache import (
     write_cache,
 )
 from .certificate_download import (
+    certificate_summary_from_pem,
     extract_certificate_pem,
     validate_download_destination,
     write_certificate_pem,
@@ -573,8 +574,16 @@ def _run_download(args: argparse.Namespace) -> int:
     target = validate_download_destination(args.output, force=args.force)
     response = _client_from_args(args).certificate_by_serial(args.serial_number)
     certificate_pem = extract_certificate_pem(response)
+    summary = certificate_summary_from_pem(certificate_pem)
     written = write_certificate_pem(target, certificate_pem, force=args.force)
-    _print_terminal(written)
+    _print_terminal(f"{tr('download_summary_path')}: {written}")
+    _print_terminal(
+        f"{tr('download_summary_serial')}: {summary.serial_number}"
+    )
+    _print_terminal(f"{tr('download_summary_subject')}: {summary.subject}")
+    _print_terminal(f"{tr('download_summary_issuer')}: {summary.issuer}")
+    _print_terminal(f"{tr('download_summary_valid_from')}: {summary.not_before}")
+    _print_terminal(f"{tr('download_summary_valid_until')}: {summary.not_after}")
     return 0
 
 
