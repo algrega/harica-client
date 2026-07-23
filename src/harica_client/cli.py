@@ -163,6 +163,8 @@ class LocalizedArgumentParser(argparse.ArgumentParser):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         kwargs["add_help"] = False
+        if sys.version_info >= (3, 14):
+            kwargs["color"] = False
         super().__init__(*args, **kwargs)
         self._positionals.title = tr("positional_arguments")
         self._optionals.title = tr("options")

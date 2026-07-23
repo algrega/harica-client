@@ -38,7 +38,7 @@ class CliTests(unittest.TestCase):
         with redirect_stdout(output):
             code = main(["version"])
         self.assertEqual(code, 0)
-        self.assertEqual(output.getvalue().strip(), "0.17.0")
+        self.assertEqual(output.getvalue().strip(), "0.17.1")
 
     def test_extract_wrapped_rows(self) -> None:
         self.assertEqual(
@@ -111,7 +111,15 @@ class CliTests(unittest.TestCase):
         malicious = "valid\x1b[2J\x07\u202e"
         errors = io.StringIO()
 
-        with redirect_stderr(errors), self.assertRaises(SystemExit) as caught:
+        with (
+            patch.dict(
+                "os.environ",
+                {"FORCE_COLOR": "1", "PYTHON_COLORS": "1"},
+                clear=True,
+            ),
+            redirect_stderr(errors),
+            self.assertRaises(SystemExit) as caught,
+        ):
             main(["list", "--status", malicious])
 
         rendered = errors.getvalue()
