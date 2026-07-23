@@ -24,6 +24,7 @@ rate limiting.
 - `production`, `staging`, and `development` environments;
 - listing `valid`, `revoked`, `expired`, or all certificates;
 - certificate lookup by serial number;
+- download of the final certificate by serial number in PEM format;
 - local filtering by FQDN, `friendlyName`, and email address;
 - optional local JSON cache for repeated offline filtering;
 - retries for `429`, `502`, `503`, and `504` with exponential backoff and jitter;
@@ -200,6 +201,7 @@ harica-client list --status all --csv all-certificates.csv
 harica-client list --status expired --environment staging
 harica-client serial 'SERIAL-NUMBER' --json
 harica-client serial 'SERIAL-NUMBER' --csv certificate.csv
+harica-client download 'SERIAL-NUMBER' --output certificate.pem
 ```
 
 ### Listing every status
@@ -311,6 +313,30 @@ receive the complete HARICA response.
 Existing files are not overwritten unless `--force` is supplied. `--json` and `--csv`
 are mutually exclusive.
 
+### Certificate download
+
+Download the final X.509 certificate returned by the serial lookup:
+
+```bash
+harica-client download 'SERIAL-NUMBER' --output certificate.pem
+openssl x509 -in certificate.pem -noout -serial -subject -issuer -dates
+```
+
+`download` always performs a live, point lookup and therefore requires an API key. It
+does not use the local cache, which deliberately excludes certificate contents. The
+command accepts the same connection options as `serial`, including `--environment`,
+`--base-url`, `--timeout`, `--max-attempts`, and `--api-key-file`.
+
+Only one final certificate is written: chains, PKCS#7/PKCS#12 data, private keys,
+concatenated certificates, and malformed values are rejected. HARICA may return PEM or
+base64-encoded DER; the saved file is normalized to PEM with LF line endings, a final
+newline, and mode `0644`.
+
+The destination name is always explicit. An existing regular file is preserved unless
+`--force` is supplied; symbolic links and non-regular destinations are rejected even
+with `--force`. Writes use a temporary file in the destination directory followed by an
+atomic replacement. The PEM contents are never printed to the terminal or logs.
+
 Default environments are:
 
 | Environment | Base URL |
@@ -384,6 +410,6 @@ Official references consulted on July 17, 2026:
 
 ## Limitations
 
-The project does not implement certificate issuance, approval, revocation, or download.
+The project does not implement certificate issuance, approval, or revocation.
 Those operations mutate state and require specific request models; they should only be
 added after reviewing the current HARICA Swagger documentation and adding dedicated tests.

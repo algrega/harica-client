@@ -154,6 +154,8 @@ class InternationalizationTests(unittest.TestCase):
             ["auth", "status", "--language", "en", "--help"],
             ["cache", "--language", "en", "status", "--help"],
             ["cache", "status", "--language", "en", "--help"],
+            ["--language", "en", "download", "--help"],
+            ["download", "--language", "en", "--help"],
         )
         for arguments in cases:
             with self.subTest(arguments=arguments):

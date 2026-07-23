@@ -83,6 +83,9 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "help_friendly_name": "Filtra per friendlyName (ricerca parziale case-insensitive)",
         "help_email": "Filtra per indirizzo email (ricerca parziale case-insensitive)",
         "help_serial": "Cerca un certificato per seriale",
+        "help_download": "Scarica un certificato X.509 in formato PEM",
+        "help_download_output": "File PEM di destinazione (obbligatorio)",
+        "help_download_force": "Sovrascrive il file PEM se esiste",
         "serial_number": "Numero seriale del certificato",
         "help_auth": "Gestisce l'API key su filesystem",
         "help_auth_set": "Salva o ruota una API key",
@@ -208,6 +211,51 @@ _CATALOGS: dict[str, dict[str, str]] = {
             "HARICA ha restituito un formato inatteso durante l'elenco dei certificati"
         ),
         "serial_empty": "Il numero seriale non può essere vuoto",
+        "download_certificate_missing": (
+            "La risposta HARICA non contiene il campo certificate"
+        ),
+        "download_certificate_not_text": (
+            "Il campo certificate nella risposta HARICA non è testuale"
+        ),
+        "download_certificate_empty": (
+            "Il campo certificate nella risposta HARICA è vuoto"
+        ),
+        "download_certificate_ambiguous": (
+            "La risposta HARICA contiene più certificati differenti"
+        ),
+        "download_certificate_invalid": (
+            "Il campo certificate non contiene un certificato X.509 valido"
+        ),
+        "download_multiple_certificates": (
+            "Il download contiene più certificati o una chain; è ammesso un solo certificato"
+        ),
+        "download_private_key_rejected": (
+            "Il download contiene una chiave privata e non può essere salvato"
+        ),
+        "download_format_unsupported": (
+            "Il formato del certificato non è supportato; sono ammessi PEM o DER in base64"
+        ),
+        "download_destination_check_failed": (
+            "Impossibile controllare la destinazione {path}: {error}"
+        ),
+        "download_destination_symlink": (
+            "La destinazione non può essere un link simbolico: {path}"
+        ),
+        "download_destination_not_regular": (
+            "La destinazione esistente non è un file regolare: {path}"
+        ),
+        "download_destination_exists": (
+            "Il file di destinazione esiste già: {path}. Usare --force per sovrascriverlo"
+        ),
+        "download_directory_create_failed": (
+            "Impossibile creare la directory di destinazione {path}: {error}"
+        ),
+        "download_directory_not_directory": (
+            "Il percorso di destinazione non è una directory: {path}"
+        ),
+        "download_write_failed": (
+            "Impossibile scrivere il certificato in {path}: {error}"
+        ),
         "network_failed_attempts": (
             "Richiesta HARICA non riuscita dopo {attempts} tentativi: {reason}"
         ),
@@ -320,6 +368,9 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "help_friendly_name": "Filter by friendlyName (case-insensitive partial match)",
         "help_email": "Filter by email address (case-insensitive partial match)",
         "help_serial": "Find a certificate by serial number",
+        "help_download": "Download an X.509 certificate in PEM format",
+        "help_download_output": "Destination PEM file (required)",
+        "help_download_force": "Overwrite the PEM file if it exists",
         "serial_number": "Certificate serial number",
         "help_auth": "Manage the API key on the filesystem",
         "help_auth_set": "Save or rotate an API key",
@@ -441,6 +492,52 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "status_invalid": "Invalid status. Allowed values: valid, revoked, expired, all",
         "list_format_unexpected": "HARICA returned an unexpected format while listing certificates",
         "serial_empty": "Serial number cannot be empty",
+        "download_certificate_missing": (
+            "The HARICA response does not contain a certificate field"
+        ),
+        "download_certificate_not_text": (
+            "The certificate field in the HARICA response is not text"
+        ),
+        "download_certificate_empty": (
+            "The certificate field in the HARICA response is empty"
+        ),
+        "download_certificate_ambiguous": (
+            "The HARICA response contains multiple different certificates"
+        ),
+        "download_certificate_invalid": (
+            "The certificate field does not contain a valid X.509 certificate"
+        ),
+        "download_multiple_certificates": (
+            "The download contains multiple certificates or a chain; "
+            "only one certificate is allowed"
+        ),
+        "download_private_key_rejected": (
+            "The download contains a private key and cannot be saved"
+        ),
+        "download_format_unsupported": (
+            "The certificate format is unsupported; PEM or base64 DER is required"
+        ),
+        "download_destination_check_failed": (
+            "Unable to inspect destination {path}: {error}"
+        ),
+        "download_destination_symlink": (
+            "The destination cannot be a symbolic link: {path}"
+        ),
+        "download_destination_not_regular": (
+            "The existing destination is not a regular file: {path}"
+        ),
+        "download_destination_exists": (
+            "The destination file already exists: {path}. Use --force to overwrite it"
+        ),
+        "download_directory_create_failed": (
+            "Unable to create destination directory {path}: {error}"
+        ),
+        "download_directory_not_directory": (
+            "The destination path is not a directory: {path}"
+        ),
+        "download_write_failed": (
+            "Unable to write the certificate to {path}: {error}"
+        ),
         "network_failed_attempts": "HARICA request failed after {attempts} attempts: {reason}",
         "network_failed": "HARICA request failed: {reason}",
         "non_json_response": "HARICA returned HTTP {status_code} with a non-JSON body",

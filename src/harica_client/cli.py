@@ -23,6 +23,11 @@ from .cache import (
     resolve_cache_path,
     write_cache,
 )
+from .certificate_download import (
+    extract_certificate_pem,
+    validate_download_destination,
+    write_certificate_pem,
+)
 from .client import Environment, HaricaClient, RetryPolicy
 from .credentials import (
     credential_deletion_target,
@@ -314,6 +319,27 @@ def build_parser() -> argparse.ArgumentParser:
     _add_connection_arguments(serial_parser)
     serial_parser.set_defaults(handler=_run_serial)
 
+    download_parser = subparsers.add_parser(
+        "download",
+        help=tr("help_download"),
+    )
+    _add_language_argument(download_parser)
+    download_parser.add_argument("serial_number", help=tr("serial_number"))
+    download_parser.add_argument(
+        "--output",
+        metavar="FILE",
+        type=Path,
+        required=True,
+        help=tr("help_download_output"),
+    )
+    download_parser.add_argument(
+        "--force",
+        action="store_true",
+        help=tr("help_download_force"),
+    )
+    _add_connection_arguments(download_parser)
+    download_parser.set_defaults(handler=_run_download)
+
     auth_parser = subparsers.add_parser("auth", help=tr("help_auth"))
     _add_language_argument(auth_parser)
     auth_subparsers = auth_parser.add_subparsers(dest="auth_command", required=True)
@@ -540,6 +566,15 @@ def _run_cache_delete(args: argparse.Namespace) -> int:
 def _run_serial(args: argparse.Namespace) -> int:
     data = _client_from_args(args).certificate_by_serial(args.serial_number)
     _render_or_export(data, args)
+    return 0
+
+
+def _run_download(args: argparse.Namespace) -> int:
+    target = validate_download_destination(args.output, force=args.force)
+    response = _client_from_args(args).certificate_by_serial(args.serial_number)
+    certificate_pem = extract_certificate_pem(response)
+    written = write_certificate_pem(target, certificate_pem, force=args.force)
+    _print_terminal(written)
     return 0
 
 

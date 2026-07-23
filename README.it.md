@@ -24,6 +24,7 @@ rate limit HTTP 429.
 - ambienti `production`, `staging` e `development`;
 - elenco certificati `valid`, `revoked`, `expired` oppure di tutti gli stati;
 - ricerca di un certificato per numero seriale;
+- download del certificato finale per numero seriale in formato PEM;
 - ricerca locale per FQDN, `friendlyName` e indirizzo email;
 - cache JSON locale opzionale per filtri offline ripetuti;
 - retry di `429`, `502`, `503` e `504` con backoff esponenziale e jitter;
@@ -211,6 +212,7 @@ harica-client list --status all --csv tutti-i-certificati.csv
 harica-client list --status expired --environment staging
 harica-client serial 'NUMERO-SERIALE' --json
 harica-client serial 'NUMERO-SERIALE' --csv certificato.csv
+harica-client download 'NUMERO-SERIALE' --output certificato.pem
 ```
 
 ### Elenco completo di tutti gli stati
@@ -360,6 +362,31 @@ harica-client list --status valid --csv certificati-validi.csv --force
 
 `--json` e `--csv` sono mutuamente esclusivi.
 
+### Download del certificato
+
+Per scaricare il certificato X.509 finale restituito dalla ricerca per seriale:
+
+```bash
+harica-client download 'NUMERO-SERIALE' --output certificato.pem
+openssl x509 -in certificato.pem -noout -serial -subject -issuer -dates
+```
+
+`download` esegue sempre una ricerca puntuale in rete e richiede quindi la API key. Non
+usa la cache locale, che esclude intenzionalmente il contenuto dei certificati. Il
+comando accetta le stesse opzioni di connessione di `serial`, incluse `--environment`,
+`--base-url`, `--timeout`, `--max-attempts` e `--api-key-file`.
+
+Viene scritto un solo certificato finale: chain, dati PKCS#7/PKCS#12, chiavi private,
+certificati concatenati e valori malformati vengono rifiutati. HARICA può restituire un
+PEM o un DER codificato in base64; il file salvato viene normalizzato in PEM con
+terminatori LF, newline finale e permessi `0644`.
+
+Il nome di destinazione deve essere sempre esplicito. Un file regolare esistente resta
+intatto salvo l'uso di `--force`; link simbolici e destinazioni non regolari vengono
+rifiutati anche con `--force`. La scrittura usa un file temporaneo nella directory di
+destinazione seguito da sostituzione atomica. Il contenuto PEM non viene mai stampato
+nel terminale o nei log.
+
 Gli ambienti predefiniti sono:
 
 | Ambiente | Base URL |
@@ -433,6 +460,6 @@ Riferimenti ufficiali consultati il 17 luglio 2026:
 
 ## Limiti
 
-Il progetto non implementa emissione, approvazione, revoca o download di certificati.
+Il progetto non implementa emissione, approvazione o revoca di certificati.
 Queste operazioni modificano stato e richiedono modelli di richiesta specifici: vanno
 aggiunte solo dopo una verifica puntuale dello Swagger HARICA e con test dedicati.
