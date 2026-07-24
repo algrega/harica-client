@@ -2,6 +2,8 @@
 
 [English](README.md) | **Italiano**
 
+[![CI](https://github.com/algrega/harica-client/actions/workflows/ci.yml/badge.svg)](https://github.com/algrega/harica-client/actions/workflows/ci.yml)
+
 Client Python sincrono e CLI per consultare i certificati tramite le API key ufficiali
 di HARICA Certificate Manager.
 
@@ -75,7 +77,7 @@ errori, ma non cambia comandi, opzioni o struttura degli export JSON e CSV.
 
 ## Requisiti e installazione
 
-- Python 3.10 o successivo;
+- Python 3.11 o successivo;
 - account HARICA con 2FA;
 - ruolo Enterprise Admin per gli endpoint implementati;
 - API key creata nel profilo HARICA.

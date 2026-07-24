@@ -25,11 +25,6 @@ from harica_client.cli import (
     main,
 )
 from harica_client.errors import HaricaConfigurationError
-from harica_client.credentials import (
-    default_api_key_path,
-    read_api_key_file,
-    write_api_key_file,
-)
 
 
 class CliTests(unittest.TestCase):

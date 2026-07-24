@@ -7,7 +7,7 @@ name = "harica-client"
 version = "0.17.1"
 description = "Cautious CLI client for the HARICA Certificate Manager APIs"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "AlGrega" }]
 keywords = ["harica", "certificate-manager", "pki", "cli"]
@@ -29,4 +29,4 @@ where = ["src"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
