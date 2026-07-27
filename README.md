@@ -496,6 +496,15 @@ Tests use a simulated HTTP transport and never contact HARICA:
 python -m unittest discover -s tests -v
 ```
 
+## Contributing
+
+Contributions are welcome. Read the [contribution guidelines](CONTRIBUTING.md) and
+[Code of Conduct](CODE_OF_CONDUCT.md), then use the appropriate
+[issue form](https://github.com/algrega/harica-client/issues/new/choose) or open a pull
+request. Report suspected vulnerabilities only through GitHub's private
+[Report a vulnerability](https://github.com/algrega/harica-client/security/advisories/new)
+form.
+
 ## Implemented endpoints
 
 ```text

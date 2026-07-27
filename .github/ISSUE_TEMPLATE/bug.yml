@@ -1,0 +1,78 @@
+name: "Bug report / Segnalazione bug"
+description: "Report a reproducible problem / Segnala un problema riproducibile"
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the report. Do not include API keys, certificate contents, private hostnames, email addresses, cache files, exports, or unsanitized logs.
+
+        Grazie per la segnalazione. Non includere API key, contenuti di certificati, hostname privati, indirizzi email, cache, esportazioni o log non ripuliti.
+
+        Report suspected vulnerabilities through the private [Report a vulnerability](https://github.com/algrega/harica-client/security/advisories/new) form.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: "Safety confirmation / Conferma di sicurezza"
+      options:
+        - label: "I searched existing issues and removed all credentials and sensitive data. / Ho cercato tra le issue esistenti e rimosso credenziali e dati sensibili."
+          required: true
+  - type: input
+    id: version
+    attributes:
+      label: "Version or commit / Versione o commit"
+      description: "For example: 0.17.1 or a full commit SHA."
+      placeholder: "0.17.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: python_version
+    attributes:
+      label: "Python version / Versione Python"
+      options:
+        - "3.11"
+        - "3.12"
+        - "3.13"
+        - "3.14"
+        - "Other / Altro"
+    validations:
+      required: true
+  - type: input
+    id: operating_system
+    attributes:
+      label: "Operating system / Sistema operativo"
+      placeholder: "macOS 15, Ubuntu 24.04, Windows 11..."
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: "Reproduction steps / Passaggi per riprodurre"
+      description: "Use sanitized example values and include the command or Python call."
+      placeholder: "1. Run...\n2. Configure...\n3. Observe..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: "Expected result / Risultato atteso"
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: "Actual result / Risultato effettivo"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: "Sanitized logs / Log ripuliti"
+      description: "Optional. Remove credentials, certificate data, hostnames, email addresses, and control sequences."
+      render: shell
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: "Additional context / Informazioni aggiuntive"

@@ -548,6 +548,15 @@ I test usano un server HTTP locale e non contattano HARICA:
 python -m unittest discover -s tests -v
 ```
 
+## Contribuire
+
+I contributi sono benvenuti. Leggi le [linee guida](CONTRIBUTING.md) e il
+[Codice di condotta](CODE_OF_CONDUCT.md), quindi usa il
+[modulo appropriato](https://github.com/algrega/harica-client/issues/new/choose) oppure
+apri una pull request. Segnala le possibili vulnerabilità esclusivamente tramite il
+modulo GitHub privato
+[Report a vulnerability](https://github.com/algrega/harica-client/security/advisories/new).
+
 ## Endpoint implementati
 
 ```text

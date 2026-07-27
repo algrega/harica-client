@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: "Security vulnerability / Vulnerabilità di sicurezza"
+    url: "https://github.com/algrega/harica-client/security/advisories/new"
+    about: "Privately report a suspected vulnerability. Never open a public issue. / Segnala privatamente una possibile vulnerabilità. Non aprire una issue pubblica."
+  - name: "Conduct report / Segnalazione di condotta"
+    url: "https://github.com/algrega/harica-client/security/advisories/new"
+    about: "Privately report unacceptable behavior and prefix the title with [Conduct]. / Segnala privatamente comportamenti inappropriati anteponendo [Conduct] al titolo."
