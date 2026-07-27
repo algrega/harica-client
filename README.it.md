@@ -12,8 +12,9 @@ supportato da HARICA.
 
 > **Nota dell'autore:** non sono un programmatore di professione. Questo progetto è
 > nato da una necessità concreta, molta curiosità e un aiuto decisamente generoso di
-> OpenAI Codex. Ho verificato il risultato con test automatici, ma occhi esperti,
-> segnalazioni e contributi sono sempre benvenuti: siate gentili, sto imparando!
+> OpenAI Codex. Oltre a eseguire i test automatici, ho verificato personalmente tutte
+> le funzionalità e sono tutte operative. Occhi esperti, segnalazioni e contributi
+> sono sempre benvenuti: siate gentili, sto imparando!
 
 Il progetto è intenzionalmente piccolo e prudente: può conservare l'API key in un file
 locale protetto, non la accetta come argomento della CLI e gestisce esplicitamente il

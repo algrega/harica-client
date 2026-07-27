@@ -12,8 +12,9 @@ or supported by HARICA.
 
 > **Author's note:** I am not a professional programmer. This project grew out of a
 > real need, plenty of curiosity, and a very generous amount of help from OpenAI Codex.
-> I have verified the result with automated tests, but expert eyes, reports, and
-> contributions are always welcome—please be kind, I am learning!
+> In addition to running the automated tests, I have personally verified every
+> feature, and all of them work as expected. Expert eyes, reports, and contributions
+> are always welcome—please be kind, I am learning!
 
 The project is deliberately small and cautious: it can store the API key in a protected
 local file, never accepts the key as a CLI argument, and explicitly handles HTTP 429
