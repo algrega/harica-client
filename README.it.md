@@ -80,7 +80,7 @@ errori, ma non cambia comandi, opzioni o struttura degli export JSON e CSV.
 - Python 3.11 o successivo;
 - account HARICA con 2FA;
 - ruolo Enterprise Admin per gli endpoint implementati;
-- API key creata nel profilo HARICA.
+- [API key creata nel profilo HARICA](https://guides.harica.gr/docs/Guides/Developer/5.-API-Keys/).
 
 ```bash
 python3 -m venv .venv

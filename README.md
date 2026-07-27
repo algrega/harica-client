@@ -45,7 +45,7 @@ rate limiting.
 - Python 3.11 or later;
 - a HARICA account with 2FA;
 - the Enterprise Admin role for the implemented endpoints;
-- an API key created in the HARICA profile.
+- [an API key created in the HARICA profile](https://guides.harica.gr/docs/Guides/Developer/5.-API-Keys/).
 
 ```bash
 python3 -m venv .venv
