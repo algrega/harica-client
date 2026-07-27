@@ -1,0 +1,76 @@
+name: "Improvement proposal / Proposta di miglioramento"
+description: "Suggest a feature or improvement / Proponi una funzionalità o un miglioramento"
+title: "[Enhancement]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the user need rather than sharing real operational data. Never include API keys, certificates, private hostnames, email addresses, cache files, or exports.
+
+        Descrivi l'esigenza senza condividere dati operativi reali. Non includere API key, certificati, hostname privati, indirizzi email, cache o esportazioni.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: "Safety confirmation / Conferma di sicurezza"
+      options:
+        - label: "I searched existing issues and removed all credentials and sensitive data. / Ho cercato tra le issue esistenti e rimosso credenziali e dati sensibili."
+          required: true
+  - type: input
+    id: version
+    attributes:
+      label: "Version or commit / Versione o commit"
+      description: "Version used while evaluating the proposal."
+      placeholder: "0.17.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: python_version
+    attributes:
+      label: "Python version / Versione Python"
+      options:
+        - "3.11"
+        - "3.12"
+        - "3.13"
+        - "3.14"
+        - "Other / Altro"
+    validations:
+      required: true
+  - type: input
+    id: operating_system
+    attributes:
+      label: "Operating system / Sistema operativo"
+      placeholder: "macOS 15, Ubuntu 24.04, Windows 11..."
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: "Current workflow / Flusso attuale"
+      description: "Explain the sanitized steps currently needed to achieve the goal."
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: "Current limitation / Limite attuale"
+      description: "What is difficult, missing, or unsafe today?"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: "Proposed outcome / Risultato proposto"
+      description: "Describe the desired behavior and its benefit."
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: "Alternatives considered / Alternative considerate"
+  - type: textarea
+    id: security_impact
+    attributes:
+      label: "Security and compatibility impact / Impatto su sicurezza e compatibilità"
+      description: "Mention changes to credentials, network behavior, CLI, Python API, or exported data."
