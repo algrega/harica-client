@@ -1363,6 +1363,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     file=sys.stderr,
                 )
             return 1
+        except HaricaConfigurationError as exc:
+            _print_terminal(f"{tr('configuration_error')}: {exc}", file=sys.stderr)
+            return 2
         except HaricaError as exc:
             _print_terminal(f"{tr('error')}: {exc}", file=sys.stderr)
             return 1

@@ -22,7 +22,10 @@ _language: ContextVar[str] = ContextVar("harica_client_language", default=DEFAUL
 
 _CATALOGS: dict[str, dict[str, str]] = {
     "it": {
-        "app_description": "Client prudente per le API Certificate Manager di HARICA",
+        "app_description": (
+            "Client e CLI non ufficiali, in sola lettura, per consultare i certificati "
+            "tramite l'API Certificate Manager di HARICA"
+        ),
         "show_help": "Mostra questo messaggio di aiuto ed esce",
         "usage": "uso",
         "positional_arguments": "argomenti posizionali",
@@ -66,8 +69,8 @@ _CATALOGS: dict[str, dict[str, str]] = {
             "File API key protetto; precede variabili d'ambiente e percorso predefinito"
         ),
         "help_auth_api_key_file": "Percorso alternativo del file API key",
-        "help_json": "Stampa il JSON integrale",
-        "help_csv": "Esporta tutti i campi in un file CSV UTF-8",
+        "help_json": "Stampa l'output JSON della CLI, senza il campo certificate",
+        "help_csv": "Esporta l'output della CLI in un file CSV UTF-8",
         "help_force": "Sovrascrive il file indicato con --csv, se esiste",
         "help_cache": "Gestisce la cache JSON locale dei certificati",
         "help_cache_refresh": "Aggiorna la cache interrogando tutti gli stati HARICA",
@@ -108,9 +111,9 @@ _CATALOGS: dict[str, dict[str, str]] = {
         ),
         "serial_number": "Numero seriale del certificato",
         "help_auth": "Gestisce l'API key su filesystem",
-        "help_auth_set": "Salva o ruota una API key",
-        "help_auth_status": "Controlla origine e sicurezza della API key",
-        "help_auth_delete": "Elimina una API key",
+        "help_auth_set": "Salva o ruota un'API key",
+        "help_auth_status": "Controlla origine e sicurezza dell'API key",
+        "help_auth_delete": "Elimina un'API key",
         "help_yes": "Conferma la cancellazione senza prompt interattivo",
         "language_missing": "l'opzione --language richiede un valore: it oppure en",
         "language_invalid": "lingua non valida: {value!r} (valori ammessi: it, en)",
@@ -133,7 +136,7 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "permissions_fix": "da correggere",
         "not_applicable": "non applicabile",
         "detail": "Dettaglio",
-        "delete_prompt": "Eliminare la API key per {environment} da {path}? [s/N] ",
+        "delete_prompt": "Eliminare l'API key per {environment} da {path}? [s/N] ",
         "confirmation_unavailable": "Conferma interattiva non disponibile; usare --yes",
         "operation_cancelled": "Operazione annullata.",
         "api_key_deleted": "API key eliminata per {environment} da {path}",
@@ -367,7 +370,10 @@ _CATALOGS: dict[str, dict[str, str]] = {
         ),
     },
     "en": {
-        "app_description": "Cautious CLI client for the HARICA Certificate Manager APIs",
+        "app_description": (
+            "Unofficial read-only client and CLI for querying certificates through "
+            "the HARICA Certificate Manager API"
+        ),
         "show_help": "Show this help message and exit",
         "usage": "usage",
         "positional_arguments": "positional arguments",
@@ -412,8 +418,8 @@ _CATALOGS: dict[str, dict[str, str]] = {
             "and the default path"
         ),
         "help_auth_api_key_file": "Alternative API key file path",
-        "help_json": "Print the complete JSON response",
-        "help_csv": "Export all fields to a UTF-8 CSV file",
+        "help_json": "Print the CLI JSON output without the certificate field",
+        "help_csv": "Export the CLI output to a UTF-8 CSV file",
         "help_force": "Overwrite the file passed to --csv if it exists",
         "help_cache": "Manage the local JSON certificate cache",
         "help_cache_refresh": "Refresh the cache by querying every HARICA status",

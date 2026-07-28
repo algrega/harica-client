@@ -132,7 +132,7 @@ class StatsCliTests(unittest.TestCase):
                     errors = io.StringIO()
                     with redirect_stdout(io.StringIO()), redirect_stderr(errors):
                         code = main(arguments)
-                    self.assertEqual(code, 1)
+                    self.assertEqual(code, 2)
                     self.assertIn("Cache file not found", errors.getvalue())
 
     def test_csv_exports_stable_headers_and_protects_formulas(self) -> None:
@@ -276,7 +276,7 @@ class StatsCliTests(unittest.TestCase):
                 )
 
         self.assertEqual(code, 0)
-        self.assertEqual(invalid_code, 1)
+        self.assertEqual(invalid_code, 2)
         self.assertIn("Avviso", errors.getvalue())
 
     def test_max_cache_age_and_missing_cache_never_fall_back_to_network(self) -> None:
@@ -308,7 +308,7 @@ class StatsCliTests(unittest.TestCase):
                     ]
                 )
 
-        self.assertEqual((old_code, missing_code), (1, 1))
+        self.assertEqual((old_code, missing_code), (2, 2))
         client_factory.assert_not_called()
 
     def test_minimal_cron_environment_uses_default_cache(self) -> None:

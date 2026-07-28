@@ -24,7 +24,11 @@ from harica_client.cli import (
     build_parser,
     main,
 )
-from harica_client.errors import HaricaConfigurationError
+from harica_client.errors import (
+    HaricaConfigurationError,
+    HaricaError,
+    HaricaRateLimitError,
+)
 
 
 class CliTests(unittest.TestCase):
@@ -33,7 +37,7 @@ class CliTests(unittest.TestCase):
         with redirect_stdout(output):
             code = main(["version"])
         self.assertEqual(code, 0)
-        self.assertEqual(output.getvalue().strip(), "0.17.1")
+        self.assertEqual(output.getvalue().strip(), "0.17.2")
 
     def test_extract_wrapped_rows(self) -> None:
         self.assertEqual(
@@ -96,11 +100,27 @@ class CliTests(unittest.TestCase):
             code = main(["version"])
 
         rendered = output.getvalue() + errors.getvalue()
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertNotIn("\x1b", rendered)
         self.assertNotIn("\x07", rendered)
         self.assertNotIn("\u202e", rendered)
         self.assertIn(r"\x1b[2J\x07\u202e", rendered)
+
+    def test_cli_exit_codes_distinguish_configuration_and_runtime_errors(self) -> None:
+        cases = (
+            (HaricaConfigurationError("invalid configuration"), 2),
+            (HaricaError("runtime failure"), 1),
+            (HaricaRateLimitError("rate limited", retry_after=None), 75),
+        )
+        for error, expected in cases:
+            with self.subTest(error=type(error).__name__):
+                with (
+                    patch("harica_client.cli._run_version", side_effect=error),
+                    redirect_stdout(io.StringIO()),
+                    redirect_stderr(io.StringIO()),
+                ):
+                    code = main(["version"])
+                self.assertEqual(code, expected)
 
     def test_argparse_errors_neutralize_terminal_sequences(self) -> None:
         malicious = "valid\x1b[2J\x07\u202e"
@@ -476,7 +496,7 @@ class CliTests(unittest.TestCase):
                 code = main(["auth", "set", "--api-key-file", str(target)])
 
         combined = output.getvalue() + errors.getvalue()
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertNotIn("first-secret", combined)
         self.assertNotIn("second-secret", combined)
         self.assertFalse(target.exists())
@@ -641,7 +661,7 @@ class CliTests(unittest.TestCase):
                     redirect_stdout(io.StringIO()),
                     redirect_stderr(io.StringIO()),
                 ):
-                    self.assertEqual(main(arguments), 1)
+                    self.assertEqual(main(arguments), 2)
 
     def test_missing_cache_never_falls_back_to_network(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -657,7 +677,7 @@ class CliTests(unittest.TestCase):
                 code = main(
                     ["list", "--from-cache", "--cache-file", str(missing)]
                 )
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         client_factory.assert_not_called()
 
     def test_cache_refresh_saves_complete_sanitized_snapshot(self) -> None:
@@ -703,7 +723,7 @@ class CliTests(unittest.TestCase):
             code = main(
                 ["cache", "refresh", "--base-url", "https://cache.example.org"]
             )
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         client_factory.assert_not_called()
 
     def test_cache_status_and_delete_do_not_use_network(self) -> None:

@@ -28,8 +28,9 @@ directly to a pull request.
 
 ### Development setup
 
-Python 3.11 or later is required. The project deliberately has no external
-runtime dependencies.
+Python 3.11 or later and a POSIX-compatible operating system are required. Linux
+and macOS are tested in CI; Windows is not currently supported. The project
+deliberately has no external runtime dependencies.
 
 ```bash
 python3 -m venv .venv
@@ -85,8 +86,9 @@ direttamente con una pull request.
 
 ### Ambiente di sviluppo
 
-È richiesto Python 3.11 o successivo. Il progetto non ha dipendenze runtime
-esterne.
+Sono richiesti Python 3.11 o successivo e un sistema operativo compatibile POSIX.
+Linux e macOS vengono verificati in CI; Windows non è attualmente supportato. Il
+progetto non ha dipendenze runtime esterne.
 
 ```bash
 python3 -m venv .venv

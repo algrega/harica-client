@@ -399,7 +399,7 @@ class DownloadCliTests(unittest.TestCase):
             ):
                 rejected = main(["download", "01"])
 
-            self.assertEqual(rejected, 1)
+            self.assertEqual(rejected, 2)
             self.assertEqual(target.read_text(encoding="ascii"), "old")
 
             with (
@@ -436,7 +436,7 @@ class DownloadCliTests(unittest.TestCase):
             ):
                 code = main(["download", "01", "--force"])
 
-            self.assertEqual(code, 1)
+            self.assertEqual(code, 2)
             self.assertTrue(target.is_symlink())
             self.assertEqual(victim.read_text(encoding="ascii"), "old")
 
@@ -514,7 +514,7 @@ class DownloadCliTests(unittest.TestCase):
                     ["download", "01", "--output", str(target)]
                 )
 
-            self.assertEqual(code, 1)
+            self.assertEqual(code, 2)
             client_factory.assert_not_called()
             self.assertEqual(target.read_text(encoding="ascii"), "old")
 
@@ -540,7 +540,7 @@ class DownloadCliTests(unittest.TestCase):
                     ]
                 )
 
-            self.assertEqual(code, 1)
+            self.assertEqual(code, 2)
             self.assertEqual(target.read_text(encoding="ascii"), "old")
 
     def test_summary_error_with_force_preserves_existing_file(self) -> None:
@@ -569,7 +569,7 @@ class DownloadCliTests(unittest.TestCase):
                     ]
                 )
 
-            self.assertEqual(code, 1)
+            self.assertEqual(code, 2)
             self.assertEqual(target.read_text(encoding="ascii"), "old")
 
     def test_summary_neutralizes_terminal_controls(self) -> None:
@@ -623,7 +623,7 @@ class DownloadCliTests(unittest.TestCase):
                     ["download", "01", "--output", str(target)]
                 )
 
-            self.assertEqual(code, 1)
+            self.assertEqual(code, 2)
             self.assertFalse(target.exists())
 
     def test_validation_error_is_localized_in_english(self) -> None:
@@ -648,7 +648,7 @@ class DownloadCliTests(unittest.TestCase):
                     ]
                 )
 
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("valid X.509 certificate", errors.getvalue())
 
     def test_output_is_optional_and_help_is_bilingual(self) -> None:

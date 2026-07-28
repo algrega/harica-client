@@ -1,14 +1,14 @@
 # harica-client
 
-[English](README.md) | **Italiano**
+[English](https://github.com/algrega/harica-client/blob/main/README.md) | **Italiano**
 
 [![CI](https://github.com/algrega/harica-client/actions/workflows/ci.yml/badge.svg)](https://github.com/algrega/harica-client/actions/workflows/ci.yml)
 
-Client Python sincrono e CLI per consultare i certificati tramite le API key ufficiali
-di HARICA Certificate Manager.
+Client Python sincrono e CLI non ufficiali, in sola lettura, per consultare i certificati
+tramite l'API HARICA Certificate Manager. Non emette, approva, annulla o revoca
+certificati e non modifica richieste o altri dati remoti HARICA.
 
-Questo è un progetto indipendente e non ufficiale. Non è affiliato, approvato o
-supportato da HARICA.
+Questo progetto indipendente non è affiliato, approvato o supportato da HARICA.
 
 > **Nota dell'autore:** non sono un programmatore di professione. Questo progetto è
 > nato da una necessità concreta, molta curiosità e un aiuto decisamente generoso di
@@ -16,12 +16,14 @@ supportato da HARICA.
 > le funzionalità e sono tutte operative. Occhi esperti, segnalazioni e contributi
 > sono sempre benvenuti: siate gentili, sto imparando!
 
-Il progetto è intenzionalmente piccolo e prudente: può conservare l'API key in un file
-locale protetto, non la accetta come argomento della CLI e gestisce esplicitamente il
-rate limit HTTP 429.
+Il progetto è intenzionalmente piccolo e prudente: ogni operazione remota usa HTTP
+`GET`. I comandi per credenziali, cache, esportazione CSV e download scrivono soltanto
+nel filesystem locale. Il client può conservare l'API key in un file locale protetto,
+non la accetta come argomento della CLI e gestisce esplicitamente il rate limit HTTP 429.
 
 ## Funzionalità
 
+- accesso remoto in sola lettura tramite HTTP `GET`;
 - autenticazione tramite header `X-API-Key`;
 - credenziali separate per ambiente, adatte a esecuzioni manuali e cron;
 - ambienti `production`, `staging` e `development`;
@@ -40,6 +42,24 @@ rate limit HTTP 429.
 - colonna `CN` nell'output tabellare, ricavata anche dal campo `dN`;
 - interfaccia CLI in italiano e inglese;
 - nessuna dipendenza runtime esterna.
+
+## Requisiti e installazione
+
+- Python 3.11 o successivo;
+- Linux, macOS o un altro sistema operativo compatibile POSIX; Windows non è supportato;
+- account HARICA con 2FA;
+- ruolo Enterprise Admin per gli endpoint implementati;
+- [API key creata nel profilo HARICA](https://guides.harica.gr/docs/Guides/Developer/5.-API-Keys/).
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install .
+```
+
+Per un'installazione modificabile destinata allo sviluppo, segui le
+[linee guida per contribuire](https://github.com/algrega/harica-client/blob/main/CONTRIBUTING.md).
 
 ## Lingua dell'interfaccia
 
@@ -76,20 +96,6 @@ La precedenza è `--language`, `HARICA_CLIENT_LANGUAGE`, preferenza salvata, qui
 Sono ammessi esclusivamente `it` ed `en`. La lingua modifica help, prompt, messaggi ed
 errori, ma non cambia comandi, opzioni o struttura degli export JSON e CSV.
 
-## Requisiti e installazione
-
-- Python 3.11 o successivo;
-- account HARICA con 2FA;
-- ruolo Enterprise Admin per gli endpoint implementati;
-- [API key creata nel profilo HARICA](https://guides.harica.gr/docs/Guides/Developer/5.-API-Keys/).
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e .
-```
-
 ## Configurazione sicura della chiave
 
 Salva la chiave una sola volta con input nascosto e doppia conferma:
@@ -98,6 +104,10 @@ Salva la chiave una sola volta con input nascosto e doppia conferma:
 harica-client auth set --environment production
 harica-client auth status --environment production
 ```
+
+`auth set` salva la chiave localmente. `auth status` indica la sorgente selezionata e,
+per un file, ne controlla esistenza, proprietario e permessi. Nessuno dei due comandi
+contatta HARICA o verifica che la chiave sia attualmente valida.
 
 Il percorso predefinito è:
 
@@ -135,12 +145,17 @@ La directory specificata deve già essere sicura oppure deve poter essere creata
 client. Un percorso esplicito può essere utilizzato anche tramite
 `HARICA_API_KEY_FILE`; la variabile contiene solo il percorso, non la chiave.
 
-La precedenza è:
+Per i comandi che leggono una chiave, inclusi `list`, `serial`, `download`,
+`cache refresh` e `auth status`, la precedenza è:
 
 1. `--api-key-file`;
-2. `HARICA_API_KEY`, mantenuta per compatibilità e CI;
+2. `HARICA_API_KEY`, mantenuta per automazioni effimere;
 3. `HARICA_API_KEY_FILE`;
 4. file predefinito dell'ambiente.
+
+Per `auth set` e `auth delete`, la precedenza della destinazione è `--api-key-file`,
+`HARICA_API_KEY_FILE`, quindi il file predefinito dell'ambiente. `HARICA_API_KEY` viene
+ignorata nella scelta del file da scrivere o eliminare.
 
 ### Rotazione e cancellazione
 
@@ -183,7 +198,7 @@ deterministica la configurazione anche nell'ambiente minimale di cron. Crea in a
 le directory di output e log con permessi adatti all'utente del job.
 
 Per aggiornare una sola volta e svolgere poi gli export senza ulteriori chiamate API,
-usa due job:
+aggiungi al medesimo crontab la variabile e i job seguenti:
 
 ```cron
 HARICA_CLIENT_CACHE_FILE=/home/harica/.cache/harica-client/certificates/production.json
@@ -198,8 +213,8 @@ fallisce senza contattare silenziosamente HARICA se la cache manca, non è valid
 troppo vecchia.
 
 Non inserire la chiave in `.zshrc`, `.profile`, crontab, argomenti della CLI o file nel
-repository. `HARICA_API_KEY` resta utile per esecuzioni effimere, ma non è il metodo
-raccomandato per la persistenza su server.
+repository. `HARICA_API_KEY` resta utile per automazioni effimere, come un job CI
+temporaneo, ma non è il metodo raccomandato per la persistenza su server.
 
 ## Utilizzo
 
@@ -253,7 +268,7 @@ harica-client cache status --environment production
 
 `cache refresh` interroga una volta gli stati `valid`, `revoked` ed `expired` e salva una
 cache JSON versionata. Le letture successive sono completamente locali e non richiedono
-la API key:
+l'API key:
 
 ```bash
 harica-client list --from-cache --status valid
@@ -401,13 +416,14 @@ vengono applicati localmente senza alcuna richiesta a HARICA.
 
 In ogni formato di output la colonna o proprietà `CN` è sempre distinta da `friendlyName`.
 Se HARICA non restituisce un campo `commonName` separato, il client estrae il CN dal
-distinguished name contenuto in `dN`. Il campo derivato `CN` viene aggiunto alla tabella,
-al JSON e al CSV; tutti gli altri nomi e valori restano quelli originali restituiti
-dall'API.
+distinguished name contenuto in `dN`. La CLI aggiunge `CN` e rimuove ogni campo
+`certificate`. Quando un filtro locale viene applicato a una risposta contenitore, un
+campo intero `total`, `count` o `totalCount` viene aggiornato al numero di righe
+filtrate. Gli altri nomi e valori restano quelli restituiti dall'API.
 
 ### Esportazione CSV
 
-L'opzione `--csv FILE` esporta tutti i campi restituiti da HARICA:
+L'opzione `--csv FILE` esporta i campi elaborati dalla CLI:
 
 ```bash
 harica-client list --status valid --csv export/certificati-validi.csv
@@ -416,8 +432,9 @@ harica-client list --status valid --csv export/certificati-validi.csv
 Il file usa UTF-8 con BOM, così da essere riconosciuto correttamente anche da Excel.
 Liste e oggetti annidati vengono salvati nella singola cella come JSON compatto. Per
 ridurre il rischio di CSV injection, i testi che iniziano con `=`, `+`, `-`, `@`, tab o
-carriage return ricevono un apostrofo iniziale; per ottenere i valori integralmente grezzi
-resta disponibile `--json`.
+carriage return ricevono un apostrofo iniziale. Usa `--json` per conservare questi valori
+senza il prefisso specifico del CSV; anche il JSON segue comunque le regole di
+elaborazione della CLI descritte di seguito.
 
 Il campo `certificate`, che può contenere l'intero certificato e rendere l'output molto
 pesante, viene escluso da tutti gli output della CLI (tabella, JSON e CSV). Il confronto
@@ -434,6 +451,10 @@ harica-client list --status valid --csv certificati-validi.csv --force
 ```
 
 `--json` e `--csv` sono mutuamente esclusivi.
+
+La tabella predefinita è una vista compatta per la lettura umana: seleziona alcune
+colonne scalari utili e tronca le celle lunghe a 48 caratteri. Usa JSON o CSV quando
+servono tutti i campi elaborati disponibili nella CLI.
 
 ### Download del certificato
 
@@ -470,7 +491,7 @@ nella directory corrente. I CN wildcard come `*.example.org` diventano
 sostituiti. Se manca un CN utilizzabile viene usato il seriale del certificato. Più CN
 differenti richiedono un `--output` esplicito.
 
-`download` esegue sempre una ricerca puntuale in rete e richiede quindi la API key. Non
+`download` esegue sempre una ricerca puntuale in rete e richiede quindi l'API key. Non
 usa la cache locale, che esclude intenzionalmente il contenuto dei certificati. Il
 comando accetta le stesse opzioni di connessione di `serial`, incluse `--environment`,
 `--base-url`, `--timeout`, `--max-attempts` e `--api-key-file`.
@@ -484,7 +505,8 @@ Usa `--output` per scegliere un nome o una directory differenti. Un file regolar
 esistente resta intatto salvo l'uso di `--force`; link simbolici e destinazioni non
 regolari vengono rifiutati anche con `--force`. La scrittura usa un file temporaneo
 nella directory di destinazione seguito da sostituzione atomica. Il contenuto PEM non
-viene mai stampato nel terminale o nei log.
+viene mai stampato nel terminale o nei log, anche se HARICA restituisce un blocco PEM
+dove era atteso JSON.
 
 Per una verifica indipendente e facoltativa sui sistemi che dispongono di OpenSSL:
 
@@ -515,10 +537,12 @@ che mantengono le regole di export esistenti, inclusa la protezione dalle formul
 ```python
 import os
 
-from harica_client import HaricaClient, RetryPolicy
+from harica_client import Environment, HaricaClient, RetryPolicy
 
 client = HaricaClient(
     os.environ["HARICA_API_KEY"],
+    environment=Environment.PRODUCTION,
+    timeout=30,
     retry_policy=RetryPolicy(max_attempts=4, base_delay=1, max_delay=60),
 )
 
@@ -526,8 +550,15 @@ validi = client.list_certificates("valid")
 certificato = client.certificate_by_serial("NUMERO-SERIALE")
 ```
 
-Il valore restituito è il JSON HARICA decodificato, senza imporre uno schema locale che
+`environment` seleziona una base URL HARICA documentata. `base_url` può sovrascriverla
+per test controllati, mentre `timeout` è il timeout HTTP in secondi. `query` aggiunge
+alla richiesta di elenco i parametri diversi da `None`. Entrambi i metodi pubblici
+restituiscono il JSON HARICA decodificato come `Any`, senza imporre uno schema locale che
 potrebbe diventare rapidamente obsoleto.
+
+Tutti gli errori pubblici derivano da `HaricaError`: `HaricaConfigurationError`,
+`HaricaNetworkError`, `HaricaHTTPError`, `HaricaAuthError`, `HaricaRateLimitError` e
+`HaricaResponseError`. Importa da `harica_client` l'eccezione specifica necessaria.
 
 ## Comportamento sul rate limit
 
@@ -551,8 +582,10 @@ python -m unittest discover -s tests -v
 
 ## Contribuire
 
-I contributi sono benvenuti. Leggi le [linee guida](CONTRIBUTING.md) e il
-[Codice di condotta](CODE_OF_CONDUCT.md), quindi usa il
+I contributi sono benvenuti. Leggi le
+[linee guida](https://github.com/algrega/harica-client/blob/main/CONTRIBUTING.md) e il
+[Codice di condotta](https://github.com/algrega/harica-client/blob/main/CODE_OF_CONDUCT.md),
+quindi usa il
 [modulo appropriato](https://github.com/algrega/harica-client/issues/new/choose) oppure
 apri una pull request. Segnala le possibili vulnerabilità esclusivamente tramite il
 modulo GitHub privato
@@ -567,13 +600,18 @@ GET /cm/v1/admin/certificates/list/expired
 GET /cm/v1/admin/certificates/serial/{serialNumber}
 ```
 
-Riferimenti ufficiali consultati il 17 luglio 2026:
+Riferimenti ufficiali:
 
-- https://guides.harica.gr/docs/Guides/Developer/5.-API-Keys/
-- https://developer.harica.gr/
+- [Manuale HARICA per l'integrazione tramite API key](https://guides.harica.gr/docs/Guides/Developer/5.-API-Keys/)
+- [Documentazione API HARICA Certificate Manager](https://developer.harica.gr/)
 
 ## Limiti
 
-Il progetto non implementa emissione, approvazione o revoca di certificati.
-Queste operazioni modificano stato e richiedono modelli di richiesta specifici: vanno
-aggiunte solo dopo una verifica puntuale dello Swagger HARICA e con test dedicati.
+Il progetto implementa esclusivamente i quattro endpoint `GET` elencati sopra. Non
+implementa emissione di certificati, approvazione o cancellazione di richieste, revoca
+di certificati o altre operazioni remote in scrittura.
+
+## Licenza
+
+Distribuito con
+[licenza MIT](https://github.com/algrega/harica-client/blob/main/LICENSE).

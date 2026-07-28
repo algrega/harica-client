@@ -22,7 +22,7 @@ body:
     attributes:
       label: "Version or commit / Versione o commit"
       description: "Version used while evaluating the proposal."
-      placeholder: "0.17.1"
+      placeholder: "0.17.2"
     validations:
       required: true
   - type: dropdown
@@ -41,7 +41,7 @@ body:
     id: operating_system
     attributes:
       label: "Operating system / Sistema operativo"
-      placeholder: "macOS 15, Ubuntu 24.04, Windows 11..."
+      placeholder: "macOS 15, Ubuntu 24.04, FreeBSD 14..."
     validations:
       required: true
   - type: textarea
