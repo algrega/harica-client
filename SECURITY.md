@@ -9,6 +9,9 @@
 Until a formal public release policy is established, only the latest code on the
 `main` branch is supported.
 
+The supported platforms are Linux, macOS, and other POSIX-compatible systems.
+Windows is not currently supported.
+
 ### Reporting a vulnerability
 
 Do not open a public issue for a suspected vulnerability. Use GitHub's private
@@ -32,6 +35,9 @@ Certificate Manager. Do not wait for the report to be reviewed.
 Fino alla definizione di una politica formale per le release pubbliche, è supportato
 soltanto il codice più recente del branch `main`.
 
+Le piattaforme supportate sono Linux, macOS e gli altri sistemi compatibili POSIX.
+Windows non è attualmente supportato.
+
 ### Segnalazione di una vulnerabilità
 
 Non aprire una issue pubblica per una possibile vulnerabilità. Usa invece il modulo
@@ -46,5 +52,5 @@ Includi, quando disponibili, la versione o il commit interessato, la versione Py
 il sistema operativo, i passaggi per riprodurre il problema, l'impatto previsto e log
 opportunamente ripuliti.
 
-Se una API key HARICA potrebbe essere stata esposta, revocala o ruotala immediatamente
+Se un'API key HARICA potrebbe essere stata esposta, revocala o ruotala immediatamente
 in HARICA Certificate Manager. Non attendere la revisione della segnalazione.

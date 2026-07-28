@@ -44,6 +44,7 @@ BASE_URLS: dict[Environment, str] = {
 }
 
 _REDACTED = "[REDACTED]"
+_PEM_BEGIN_MARKER = "-----BEGIN "
 
 
 class _NoRedirectHandler(HTTPRedirectHandler):
@@ -260,7 +261,7 @@ class HaricaClient:
         try:
             return json.loads(body)
         except json.JSONDecodeError as exc:
-            content = body[:300]
+            content = "" if _PEM_BEGIN_MARKER in body.upper() else body[:300]
             raise HaricaResponseError(
                 tr("non_json_response", status_code=status_code),
                 body_preview=content,

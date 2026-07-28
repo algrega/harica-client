@@ -91,7 +91,7 @@ class HaricaClientTests(unittest.TestCase):
         )
         self.assertEqual(server.requests[0]["api_key"], "secret")
         self.assertEqual(server.requests[0]["accept"], "application/json")
-        self.assertEqual(server.requests[0]["user_agent"], "harica-client/0.17.1")
+        self.assertEqual(server.requests[0]["user_agent"], "harica-client/0.17.2")
 
     def test_all_lists_and_combines_each_status(self) -> None:
         responses = [
@@ -183,6 +183,20 @@ class HaricaClientTests(unittest.TestCase):
                 client.list_certificates()
 
         self.assertEqual(caught.exception.body_preview, "not-json")
+
+    def test_non_json_pem_response_has_no_preview(self) -> None:
+        pem_bodies = (
+            b"-----BEGIN CERTIFICATE-----\nSENSITIVE\n-----END CERTIFICATE-----",
+            b"prefix\n-----BEGIN PRIVATE KEY-----\nSENSITIVE\n-----END PRIVATE KEY-----",
+        )
+        for body in pem_bodies:
+            with self.subTest(body=body.splitlines()[0]):
+                with _ScenarioTransport([(200, {}, body)]) as server:
+                    client = HaricaClient("secret", base_url=server.url)
+                    with self.assertRaises(HaricaResponseError) as caught:
+                        client.list_certificates()
+
+                self.assertEqual(caught.exception.body_preview, "")
 
     def test_remote_text_is_redacted_before_errors_are_exposed(self) -> None:
         secret = "FAKE-ASSESSMENT-KEY-DO-NOT-LOG"
