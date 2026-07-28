@@ -238,9 +238,13 @@ def _add_auth_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_output_arguments(parser: argparse.ArgumentParser) -> None:
+def _add_output_arguments(
+    parser: argparse.ArgumentParser,
+    *,
+    json_help_key: str = "help_json",
+) -> None:
     output = parser.add_mutually_exclusive_group()
-    output.add_argument("--json", action="store_true", help=tr("help_json"))
+    output.add_argument("--json", action="store_true", help=tr(json_help_key))
     output.add_argument(
         "--csv",
         metavar="FILE",
@@ -277,7 +281,7 @@ def _add_stats_arguments(parser: argparse.ArgumentParser) -> None:
         type=float,
         help=tr("help_max_cache_age"),
     )
-    _add_output_arguments(parser)
+    _add_output_arguments(parser, json_help_key="help_stats_json")
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -17,9 +17,10 @@ This independent project is not affiliated with, endorsed by, or supported by HA
 > are always welcome—please be kind, I am learning!
 
 The project is deliberately small and cautious: every remote operation uses HTTP `GET`.
-Commands for credentials, caching, CSV export, and certificate download write only to
-the local filesystem. The client can store the API key in a protected local file, never
-accepts it as a CLI argument, and explicitly handles HTTP 429 rate limiting.
+Commands for credentials, language preferences, caching, CSV export, and certificate
+download write only to the local filesystem. The client can store the API key in a
+protected local file, never accepts it as a CLI argument, and explicitly handles HTTP
+429 rate limiting.
 
 ## Features
 
@@ -51,7 +52,11 @@ accepts it as a CLI argument, and explicitly handles HTTP 429 rate limiting.
 - the Enterprise Admin role for the implemented endpoints;
 - [an API key created in the HARICA profile](https://guides.harica.gr/docs/Guides/Developer/5.-API-Keys/).
 
+Clone the repository and run the installation from its root directory:
+
 ```bash
+git clone https://github.com/algrega/harica-client.git
+cd harica-client
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -229,6 +234,23 @@ harica-client stats expirations --within 30
 harica-client stats owners
 harica-client stats quality
 ```
+
+### Connection options
+
+The live `list`, `serial`, and `download` commands and `cache refresh` accept the same
+connection options:
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `--environment` | `production` | Selects `production`, `staging`, or `development`. |
+| `--base-url` | environment URL | Overrides the selected environment for controlled tests. |
+| `--timeout` | `30` seconds | Sets the positive HTTP timeout for each request. |
+| `--max-attempts` | `4` | Sets the total number of attempts; it must be at least one. |
+| `--api-key-file` | automatic resolution | Uses an explicit protected key file with the highest precedence. |
+
+With `list --from-cache`, no network request is made: `--environment` selects the
+expected cache environment, while `--base-url`, `--timeout`, `--max-attempts`, and
+`--api-key-file` are not used.
 
 ### Listing every status
 
@@ -443,9 +465,8 @@ usable CN, the certificate serial number is used. Multiple different CN values r
 an explicit `--output`.
 
 `download` always performs a live, point lookup and therefore requires an API key. It
-does not use the local cache, which deliberately excludes certificate contents. The
-command accepts the same connection options as `serial`, including `--environment`,
-`--base-url`, `--timeout`, `--max-attempts`, and `--api-key-file`.
+does not use the local cache, which deliberately excludes certificate contents. It uses
+the connection options documented above.
 
 Only one final certificate is written: chains, PKCS#7/PKCS#12 data, private keys,
 concatenated certificates, and malformed values are rejected. HARICA may return PEM or
@@ -505,10 +526,11 @@ controlled testing, while `timeout` is the HTTP timeout in seconds. `query` adds
 non-`None` query parameters to list requests. Both public methods return decoded HARICA
 JSON as `Any`, without a local schema that could quickly become outdated.
 
-All public failures derive from `HaricaError`: `HaricaConfigurationError`,
-`HaricaNetworkError`, `HaricaHTTPError`, `HaricaAuthError`, `HaricaRateLimitError`, and
-`HaricaResponseError`. Import the specific exception needed by the caller from
-`harica_client`.
+Operational errors raised by `HaricaClient` derive from `HaricaError`:
+`HaricaConfigurationError`, `HaricaNetworkError`, `HaricaHTTPError`, `HaricaAuthError`,
+`HaricaRateLimitError`, and `HaricaResponseError`. Import the specific exception needed
+by the caller from `harica_client`. Constructing a `RetryPolicy` with `max_attempts`
+smaller than one or with negative delay or jitter values raises `ValueError`.
 
 ## Rate-limit behavior
 
@@ -524,7 +546,8 @@ The CLI exits with code `75` while the rate limit remains active. Ordinary error
 
 ## Tests
 
-Tests use a simulated HTTP transport and never contact HARICA:
+Tests use simulated HTTP transports and a temporary loopback HTTP server. They never
+contact HARICA:
 
 ```bash
 python -m unittest discover -s tests -v

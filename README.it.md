@@ -17,9 +17,10 @@ Questo progetto indipendente non è affiliato, approvato o supportato da HARICA.
 > sono sempre benvenuti: siate gentili, sto imparando!
 
 Il progetto è intenzionalmente piccolo e prudente: ogni operazione remota usa HTTP
-`GET`. I comandi per credenziali, cache, esportazione CSV e download scrivono soltanto
-nel filesystem locale. Il client può conservare l'API key in un file locale protetto,
-non la accetta come argomento della CLI e gestisce esplicitamente il rate limit HTTP 429.
+`GET`. I comandi per credenziali, preferenza linguistica, cache, esportazione CSV e
+download scrivono soltanto nel filesystem locale. Il client può conservare l'API key in
+un file locale protetto, non la accetta come argomento della CLI e gestisce
+esplicitamente il rate limit HTTP 429.
 
 ## Funzionalità
 
@@ -39,7 +40,7 @@ non la accetta come argomento della CLI e gestisce esplicitamente il rate limit 
 - errori distinti per autenticazione, rate limit, rete, HTTP e risposta non JSON;
 - neutralizzazione delle sequenze di controllo nell'output leggibile a terminale;
 - output tabellare o JSON ed esportazione CSV;
-- colonna `CN` nell'output tabellare, ricavata anche dal campo `dN`;
+- campo `CN` in tutti gli output della CLI, ricavato anche dal campo `dN`;
 - interfaccia CLI in italiano e inglese;
 - nessuna dipendenza runtime esterna.
 
@@ -51,7 +52,11 @@ non la accetta come argomento della CLI e gestisce esplicitamente il rate limit 
 - ruolo Enterprise Admin per gli endpoint implementati;
 - [API key creata nel profilo HARICA](https://guides.harica.gr/docs/Guides/Developer/5.-API-Keys/).
 
+Clona il repository ed esegui l'installazione dalla sua directory principale:
+
 ```bash
+git clone https://github.com/algrega/harica-client.git
+cd harica-client
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -239,6 +244,23 @@ harica-client stats expirations --within 30
 harica-client stats owners
 harica-client stats quality
 ```
+
+### Opzioni di connessione
+
+I comandi live `list`, `serial` e `download` e il comando `cache refresh` accettano le
+stesse opzioni di connessione:
+
+| Opzione | Valore predefinito | Funzione |
+| --- | --- | --- |
+| `--environment` | `production` | Seleziona `production`, `staging` o `development`. |
+| `--base-url` | URL dell'ambiente | Sostituisce l'ambiente selezionato per test controllati. |
+| `--timeout` | `30` secondi | Imposta il timeout HTTP positivo per ogni richiesta. |
+| `--max-attempts` | `4` | Imposta il numero totale di tentativi, almeno uno. |
+| `--api-key-file` | risoluzione automatica | Usa un file protetto esplicito con la precedenza più alta. |
+
+Con `list --from-cache` non viene eseguita alcuna richiesta di rete: `--environment`
+seleziona l'ambiente atteso della cache, mentre `--base-url`, `--timeout`,
+`--max-attempts` e `--api-key-file` non vengono utilizzate.
 
 ### Elenco completo di tutti gli stati
 
@@ -492,9 +514,8 @@ sostituiti. Se manca un CN utilizzabile viene usato il seriale del certificato. 
 differenti richiedono un `--output` esplicito.
 
 `download` esegue sempre una ricerca puntuale in rete e richiede quindi l'API key. Non
-usa la cache locale, che esclude intenzionalmente il contenuto dei certificati. Il
-comando accetta le stesse opzioni di connessione di `serial`, incluse `--environment`,
-`--base-url`, `--timeout`, `--max-attempts` e `--api-key-file`.
+usa la cache locale, che esclude intenzionalmente il contenuto dei certificati. Usa le
+opzioni di connessione documentate sopra.
 
 Viene scritto un solo certificato finale: chain, dati PKCS#7/PKCS#12, chiavi private,
 certificati concatenati e valori malformati vengono rifiutati. HARICA può restituire un
@@ -556,9 +577,11 @@ alla richiesta di elenco i parametri diversi da `None`. Entrambi i metodi pubbli
 restituiscono il JSON HARICA decodificato come `Any`, senza imporre uno schema locale che
 potrebbe diventare rapidamente obsoleto.
 
-Tutti gli errori pubblici derivano da `HaricaError`: `HaricaConfigurationError`,
-`HaricaNetworkError`, `HaricaHTTPError`, `HaricaAuthError`, `HaricaRateLimitError` e
-`HaricaResponseError`. Importa da `harica_client` l'eccezione specifica necessaria.
+Gli errori operativi sollevati da `HaricaClient` derivano da `HaricaError`:
+`HaricaConfigurationError`, `HaricaNetworkError`, `HaricaHTTPError`,
+`HaricaAuthError`, `HaricaRateLimitError` e `HaricaResponseError`. Importa da
+`harica_client` l'eccezione specifica necessaria. La creazione di una `RetryPolicy` con
+`max_attempts` minore di uno oppure con ritardi o jitter negativi solleva `ValueError`.
 
 ## Comportamento sul rate limit
 
@@ -574,7 +597,8 @@ restituiscono `1`, mentre gli errori di uso/configurazione restituiscono `2`.
 
 ## Test
 
-I test usano un server HTTP locale e non contattano HARICA:
+I test usano trasporti HTTP simulati e un server HTTP loopback temporaneo. Non
+contattano mai HARICA:
 
 ```bash
 python -m unittest discover -s tests -v
