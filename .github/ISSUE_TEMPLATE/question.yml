@@ -21,7 +21,8 @@ body:
     id: version
     attributes:
       label: "Version or commit / Versione o commit"
-      placeholder: "0.17.2"
+      description: "Paste the output of harica-client version or a full commit SHA. / Incolla l'output di harica-client version o uno SHA completo."
+      placeholder: "version output / SHA completo"
     validations:
       required: true
   - type: dropdown

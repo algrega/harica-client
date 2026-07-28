@@ -52,6 +52,22 @@ class InternationalizationTests(unittest.TestCase):
         self.assertIn("Show the version", rendered)
         self.assertIn("options:", rendered)
 
+    def test_stats_json_help_describes_reports_without_certificate_wording(self) -> None:
+        cases = (
+            ("it", "Stampa il report in formato JSON"),
+            ("en", "Print the report as JSON"),
+        )
+        for language, expected in cases:
+            with self.subTest(language=language):
+                stats_help = self._help(
+                    ["--language", language, "stats", "summary", "--help"]
+                )
+                list_help = self._help(["--language", language, "list", "--help"])
+
+                self.assertIn(expected, stats_help)
+                self.assertNotIn("certificate", stats_help)
+                self.assertIn("certificate", list_help)
+
     def test_persistent_language_lifecycle(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             environment = {"HOME": directory}
