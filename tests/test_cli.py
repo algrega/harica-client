@@ -131,7 +131,11 @@ class CliTests(unittest.TestCase):
         with (
             patch.dict(
                 "os.environ",
-                {"FORCE_COLOR": "1", "PYTHON_COLORS": "1"},
+                {
+                    "FORCE_COLOR": "1",
+                    "PYTHON_COLORS": "1",
+                    "HARICA_CLIENT_LANGUAGE": "it",
+                },
                 clear=True,
             ),
             redirect_stderr(errors),
@@ -446,7 +450,11 @@ class CliTests(unittest.TestCase):
             output = io.StringIO()
             errors = io.StringIO()
             with (
-                patch.dict("os.environ", {}, clear=True),
+                patch.dict(
+                    "os.environ",
+                    {"HARICA_CLIENT_LANGUAGE": "it"},
+                    clear=True,
+                ),
                 patch("harica_client.cli.getpass.getpass", side_effect=[secret, secret]),
                 redirect_stdout(output),
                 redirect_stderr(errors),
@@ -487,7 +495,11 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "credentials" / "production.key"
             with (
-                patch.dict("os.environ", {}, clear=True),
+                patch.dict(
+                    "os.environ",
+                    {"HARICA_CLIENT_LANGUAGE": "it"},
+                    clear=True,
+                ),
                 patch(
                     "harica_client.cli.getpass.getpass",
                     side_effect=["first-secret", "second-secret"],
@@ -525,17 +537,19 @@ class CliTests(unittest.TestCase):
         secret = "environment-secret-not-for-output"
         output = io.StringIO()
         errors = io.StringIO()
-        with tempfile.TemporaryDirectory() as directory:
-            with (
-                patch.dict(
-                    "os.environ",
-                    {"HARICA_API_KEY": secret, "HOME": directory},
-                    clear=True,
-                ),
-                redirect_stdout(output),
-                redirect_stderr(errors),
-            ):
-                code = main(["auth", "status", "--environment", "production"])
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "HARICA_API_KEY": secret,
+                    "HARICA_CLIENT_LANGUAGE": "it",
+                },
+                clear=True,
+            ),
+            redirect_stdout(output),
+            redirect_stderr(errors),
+        ):
+            code = main(["auth", "status", "--environment", "production"])
 
         combined = output.getvalue() + errors.getvalue()
         self.assertEqual(code, 0)
@@ -570,7 +584,11 @@ class CliTests(unittest.TestCase):
                 certificates=rows,
             )
             with (
-                patch.dict("os.environ", {"HOME": directory}, clear=True),
+                patch.dict(
+                    "os.environ",
+                    {"HARICA_CLIENT_LANGUAGE": "it"},
+                    clear=True,
+                ),
                 patch(
                     "harica_client.cli._client_from_args",
                     side_effect=AssertionError("network must not be used"),
@@ -701,7 +719,14 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "private" / "production.json"
             with (
-                patch.dict("os.environ", {"HARICA_API_KEY": secret}, clear=True),
+                patch.dict(
+                    "os.environ",
+                    {
+                        "HARICA_API_KEY": secret,
+                        "HARICA_CLIENT_LANGUAGE": "it",
+                    },
+                    clear=True,
+                ),
                 patch("harica_client.cli._client_from_args", return_value=client),
                 redirect_stdout(output),
                 redirect_stderr(io.StringIO()),

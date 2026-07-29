@@ -280,7 +280,11 @@ class InternationalizationTests(unittest.TestCase):
     def test_argparse_errors_are_localized(self) -> None:
         errors = io.StringIO()
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict(
+                "os.environ",
+                {"HARICA_CLIENT_LANGUAGE": "it"},
+                clear=True,
+            ),
             redirect_stderr(errors),
             self.assertRaises(SystemExit) as caught,
         ):

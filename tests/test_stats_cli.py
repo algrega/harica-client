@@ -70,7 +70,11 @@ class StatsCliTests(unittest.TestCase):
                     output = io.StringIO()
                     errors = io.StringIO()
                     with (
-                        patch.dict("os.environ", {"HOME": directory}, clear=True),
+                        patch.dict(
+                            "os.environ",
+                            {"HARICA_CLIENT_LANGUAGE": "it"},
+                            clear=True,
+                        ),
                         patch(
                             "harica_client.cli._client_from_args",
                             side_effect=AssertionError("network must not be used"),
