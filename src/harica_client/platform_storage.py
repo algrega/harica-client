@@ -13,7 +13,7 @@ from typing import Mapping
 IS_WINDOWS = os.name == "nt"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class StoragePathError(Exception):
     """Errore strutturato di validazione di un percorso locale."""
 

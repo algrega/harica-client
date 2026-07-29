@@ -281,7 +281,7 @@ def _read_secure_text(path: Path) -> str:
             if exc.reason == "invalid_format"
             else "dpapi_unprotect_failed"
         )
-        values = {"path": exc.path}
+        values = {"path": path}
         if key == "dpapi_unprotect_failed":
             values["error"] = exc
         raise HaricaConfigurationError(tr(key, **values)) from exc
@@ -330,7 +330,7 @@ def _ensure_secure_directory(path: Path) -> None:
             "permissions": "cache_dir_permissions",
         }
         key = keys.get(exc.reason, "cache_dir_check_failed")
-        values = {"path": path}
+        values = {"path": exc.path}
         if exc.mode is not None:
             values["mode"] = exc.mode
         if key == "cache_dir_check_failed":

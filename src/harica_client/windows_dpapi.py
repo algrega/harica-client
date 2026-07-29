@@ -14,7 +14,7 @@ _PURPOSES = frozenset({"api-key", "cache"})
 _CRYPTPROTECT_UI_FORBIDDEN = 0x1
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class DpapiError(Exception):
     """Errore DPAPI classificato senza includere il contenuto protetto."""
 
