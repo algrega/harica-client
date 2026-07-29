@@ -5,13 +5,23 @@ from __future__ import annotations
 import os
 import re
 import stat
-import tempfile
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
+
+from .platform_storage import (
+    IS_WINDOWS,
+    StoragePathError,
+    atomic_write_bytes,
+    config_root,
+    ensure_private_directory,
+    is_reparse_point,
+    read_stable_bytes,
+    storage_path,
+)
 
 SUPPORTED_LANGUAGES = ("it", "en")
 LANGUAGE_ENV = "HARICA_CLIENT_LANGUAGE"
@@ -73,11 +83,11 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "help_stats_json": "Stampa il report in formato JSON",
         "help_csv": "Esporta l'output della CLI in un file CSV UTF-8",
         "help_force": "Sovrascrive il file indicato con --csv, se esiste",
-        "help_cache": "Gestisce la cache JSON locale dei certificati",
+        "help_cache": "Gestisce la cache locale protetta dei certificati",
         "help_cache_refresh": "Aggiorna la cache interrogando tutti gli stati HARICA",
         "help_cache_status": "Mostra validità, origine, età e contenuto della cache",
         "help_cache_delete": "Elimina la cache locale",
-        "help_cache_file": "Percorso alternativo del file cache JSON",
+        "help_cache_file": "Percorso alternativo del file cache protetto",
         "help_from_cache": "Legge e filtra la cache locale senza contattare HARICA",
         "help_max_cache_age": "Età massima accettata della cache, in ore",
         "help_stats": "Calcola statistiche usando esclusivamente la cache locale",
@@ -205,6 +215,15 @@ _CATALOGS: dict[str, dict[str, str]] = {
         ),
         "cache_absolute_xdg": "XDG_CACHE_HOME deve essere un percorso assoluto",
         "cache_absolute_home": "HOME deve produrre un percorso cache assoluto",
+        "windows_cache_absolute": (
+            "LOCALAPPDATA deve essere un percorso Windows locale e assoluto"
+        ),
+        "windows_path_not_absolute": (
+            "Su Windows il percorso deve essere assoluto: {path}"
+        ),
+        "windows_path_not_local": (
+            "I percorsi UNC e device non sono supportati per credenziali o cache: {path}"
+        ),
         "cache_not_serializable": "I certificati non sono serializzabili in JSON: {error}",
         "cache_response_invalid": (
             "La risposta HARICA non è utilizzabile per creare la cache"
@@ -235,6 +254,9 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "cache_changed_during_read": "Il file cache è cambiato durante la lettura: {path}",
         "cache_check_failed": "Impossibile controllare la cache {path}: {error}",
         "cache_symlink": "Il file cache non può essere un link simbolico: {path}",
+        "cache_reparse": (
+            "Il file cache non può essere un link, una junction o un reparse point: {path}"
+        ),
         "cache_not_regular": "Il percorso cache non è un file regolare: {path}",
         "cache_wrong_owner": "Il file cache non appartiene all'utente corrente: {path}",
         "cache_permissions": (
@@ -335,11 +357,17 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "request_rejected": "Richiesta HARICA rifiutata (HTTP {status_code}){suffix}",
         "absolute_xdg": "XDG_CONFIG_HOME deve essere un percorso assoluto",
         "absolute_home": "HOME deve essere un percorso assoluto",
+        "windows_config_absolute": (
+            "APPDATA deve essere un percorso Windows locale e assoluto"
+        ),
         "env_empty": "{name} è definita ma vuota",
         "default_file": "file predefinito",
         "configuration": "configurazione",
         "environment_variable_set": "variabile d'ambiente valorizzata",
         "secure_file_detail": "file regolare, proprietario corretto e permessi sicuri",
+        "dpapi_file_detail": (
+            "file cifrato e autenticato con DPAPI per l'utente Windows corrente"
+        ),
         "api_key_read_failed": "Impossibile leggere il file API key {path}: {error}",
         "api_key_file_empty": "Il file API key è vuoto: {path}",
         "api_key_empty": "L'API key non può essere vuota",
@@ -348,6 +376,28 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "api_key_file_missing": "File API key non trovato: {path}",
         "api_key_file_check_failed": "Impossibile controllare il file API key {path}: {error}",
         "api_key_symlink": "Il file API key non può essere un link simbolico: {path}",
+        "api_key_reparse": (
+            "Il file API key non può essere un link, una junction o un reparse point: {path}"
+        ),
+        "api_key_changed_during_read": (
+            "Il file API key è cambiato durante la lettura: {path}"
+        ),
+        "dpapi_api_key_invalid_format": (
+            "Il file API key non è un contenitore DPAPI valido: {path}. "
+            "Crearlo con 'harica-client auth set' oppure usare HARICA_API_KEY "
+            "per automazioni effimere"
+        ),
+        "dpapi_cache_invalid_format": (
+            "Il file cache non è un contenitore DPAPI valido: {path}; "
+            "ricrearlo con 'harica-client cache refresh'"
+        ),
+        "dpapi_protect_failed": (
+            "Windows non ha potuto proteggere con DPAPI il file {path}: {error}"
+        ),
+        "dpapi_unprotect_failed": (
+            "Windows non ha potuto decifrare il file DPAPI {path}: {error}. "
+            "Il file può essere manomesso o appartenere a un altro utente o computer"
+        ),
         "api_key_not_regular": "Il percorso API key non è un file regolare: {path}",
         "api_key_wrong_owner": "Il file API key non appartiene all'utente corrente: {path}",
         "api_key_permissions": (
@@ -423,11 +473,11 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "help_stats_json": "Print the report as JSON",
         "help_csv": "Export the CLI output to a UTF-8 CSV file",
         "help_force": "Overwrite the file passed to --csv if it exists",
-        "help_cache": "Manage the local JSON certificate cache",
+        "help_cache": "Manage the protected local certificate cache",
         "help_cache_refresh": "Refresh the cache by querying every HARICA status",
         "help_cache_status": "Show cache validity, source, age, and contents",
         "help_cache_delete": "Delete the local cache",
-        "help_cache_file": "Alternative JSON cache file path",
+        "help_cache_file": "Alternative protected cache file path",
         "help_from_cache": "Read and filter the local cache without contacting HARICA",
         "help_max_cache_age": "Maximum accepted cache age in hours",
         "help_stats": "Calculate statistics using only the local cache",
@@ -555,6 +605,15 @@ _CATALOGS: dict[str, dict[str, str]] = {
         ),
         "cache_absolute_xdg": "XDG_CACHE_HOME must be an absolute path",
         "cache_absolute_home": "HOME must produce an absolute cache path",
+        "windows_cache_absolute": (
+            "LOCALAPPDATA must be a local absolute Windows path"
+        ),
+        "windows_path_not_absolute": (
+            "On Windows, the path must be absolute: {path}"
+        ),
+        "windows_path_not_local": (
+            "UNC and device paths are unsupported for credentials or cache: {path}"
+        ),
         "cache_not_serializable": "Certificates cannot be serialized as JSON: {error}",
         "cache_response_invalid": (
             "The HARICA response cannot be used to create the cache"
@@ -585,6 +644,9 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "cache_changed_during_read": "Cache file changed while being read: {path}",
         "cache_check_failed": "Unable to inspect cache file {path}: {error}",
         "cache_symlink": "Cache file cannot be a symbolic link: {path}",
+        "cache_reparse": (
+            "Cache file cannot be a link, junction, or reparse point: {path}"
+        ),
         "cache_not_regular": "Cache path is not a regular file: {path}",
         "cache_wrong_owner": "Cache file is not owned by the current user: {path}",
         "cache_permissions": (
@@ -680,11 +742,17 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "request_rejected": "HARICA request rejected (HTTP {status_code}){suffix}",
         "absolute_xdg": "XDG_CONFIG_HOME must be an absolute path",
         "absolute_home": "HOME must be an absolute path",
+        "windows_config_absolute": (
+            "APPDATA must be a local absolute Windows path"
+        ),
         "env_empty": "{name} is set but empty",
         "default_file": "default file",
         "configuration": "configuration",
         "environment_variable_set": "environment variable is set",
         "secure_file_detail": "regular file, correct owner, and secure permissions",
+        "dpapi_file_detail": (
+            "file encrypted and authenticated with DPAPI for the current Windows user"
+        ),
         "api_key_read_failed": "Unable to read API key file {path}: {error}",
         "api_key_file_empty": "API key file is empty: {path}",
         "api_key_empty": "API key cannot be empty",
@@ -693,6 +761,28 @@ _CATALOGS: dict[str, dict[str, str]] = {
         "api_key_file_missing": "API key file not found: {path}",
         "api_key_file_check_failed": "Unable to inspect API key file {path}: {error}",
         "api_key_symlink": "API key file cannot be a symbolic link: {path}",
+        "api_key_reparse": (
+            "API key file cannot be a link, junction, or reparse point: {path}"
+        ),
+        "api_key_changed_during_read": (
+            "API key file changed while being read: {path}"
+        ),
+        "dpapi_api_key_invalid_format": (
+            "API key file is not a valid DPAPI container: {path}. "
+            "Create it with 'harica-client auth set' or use HARICA_API_KEY "
+            "for ephemeral automation"
+        ),
+        "dpapi_cache_invalid_format": (
+            "Cache file is not a valid DPAPI container: {path}; "
+            "recreate it with 'harica-client cache refresh'"
+        ),
+        "dpapi_protect_failed": (
+            "Windows could not protect file {path} with DPAPI: {error}"
+        ),
+        "dpapi_unprotect_failed": (
+            "Windows could not decrypt DPAPI file {path}: {error}. "
+            "The file may be tampered with or belong to another user or computer"
+        ),
         "api_key_not_regular": "API key path is not a regular file: {path}",
         "api_key_wrong_owner": "API key file is not owned by the current user: {path}",
         "api_key_permissions": (
@@ -757,55 +847,69 @@ def default_language_path(
     *,
     environ: Mapping[str, str] | None = None,
 ) -> Path:
-    """Restituisce il percorso XDG della preferenza persistente."""
+    """Restituisce il percorso nativo della preferenza persistente."""
     current = os.environ if environ is None else environ
-    xdg_config_home = current.get("XDG_CONFIG_HOME", "").strip()
-    if xdg_config_home:
-        root = Path(xdg_config_home).expanduser()
-        if not root.is_absolute():
-            raise LanguageSelectionError("absolute_xdg")
-    else:
-        configured_home = current.get("HOME", "").strip()
-        root = (Path(configured_home).expanduser() if configured_home else Path.home()) / ".config"
-        if not root.is_absolute():
-            raise LanguageSelectionError("absolute_home")
-    return Path(os.path.abspath(root / "harica-client" / "language"))
+    try:
+        root = config_root(current)
+    except StoragePathError as exc:
+        keys = {
+            "config_root_not_absolute": (
+                "windows_config_absolute" if IS_WINDOWS else "absolute_xdg"
+            ),
+            "home_not_absolute": "absolute_home",
+        }
+        raise LanguageSelectionError(
+            keys.get(exc.reason, "windows_config_absolute")
+        ) from exc
+    path = root / "harica-client" / "language"
+    try:
+        return storage_path(path)
+    except StoragePathError as exc:
+        raise LanguageSelectionError(
+            "language_file_not_regular",
+            value=str(exc.path),
+        ) from exc
 
 
 def read_saved_language(
     *,
     environ: Mapping[str, str] | None = None,
 ) -> LanguagePreference | None:
-    """Legge la preferenza persistente dopo controlli POSIX di base."""
+    """Legge la preferenza persistente dopo controlli di sicurezza di base."""
     path = default_language_path(environ=environ)
-    if not _validate_saved_language_metadata(path, missing_ok=True):
+    metadata = _validate_saved_language_metadata(path, missing_ok=True)
+    if metadata is None:
         return None
     try:
-        selected = path.read_text(encoding="utf-8").strip()
-    except OSError as exc:
+        selected = read_stable_bytes(path, metadata).decode("utf-8").strip()
+    except (OSError, UnicodeError, StoragePathError) as exc:
         raise _language_io_error(path, exc) from exc
     if selected not in SUPPORTED_LANGUAGES:
         raise LanguageSelectionError("language_invalid", value=selected)
     return LanguagePreference(selected, "saved", path)
 
 
-def _validate_saved_language_metadata(path: Path, *, missing_ok: bool) -> bool:
+def _validate_saved_language_metadata(
+    path: Path,
+    *,
+    missing_ok: bool,
+) -> os.stat_result | None:
     try:
         metadata = path.lstat()
     except FileNotFoundError:
         if missing_ok:
-            return False
+            return None
         raise LanguageSelectionError("language_file_missing", value=str(path)) from None
     except OSError as exc:
         raise _language_io_error(path, exc) from exc
 
-    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+    if is_reparse_point(metadata) or not stat.S_ISREG(metadata.st_mode):
         raise LanguageSelectionError("language_file_not_regular", value=str(path))
-    if metadata.st_uid != os.geteuid():
+    if not IS_WINDOWS and metadata.st_uid != os.geteuid():
         raise LanguageSelectionError("language_file_wrong_owner", value=str(path))
-    if metadata.st_mode & 0o022:
+    if not IS_WINDOWS and metadata.st_mode & 0o022:
         raise LanguageSelectionError("language_file_writable", value=str(path))
-    return True
+    return metadata
 
 
 def write_saved_language(
@@ -813,57 +917,21 @@ def write_saved_language(
     *,
     environ: Mapping[str, str] | None = None,
 ) -> Path:
-    """Salva atomicamente una preferenza con directory 0700 e file 0600."""
+    """Salva atomicamente una preferenza con protezioni native della piattaforma."""
     if language not in SUPPORTED_LANGUAGES:
         raise LanguageSelectionError("language_invalid", value=language)
     path = default_language_path(environ=environ)
     directory = path.parent
-    previous_umask = os.umask(0o077)
     try:
-        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    except OSError as exc:
+        ensure_private_directory(directory)
+    except (OSError, StoragePathError) as exc:
         raise _language_io_error(directory, exc) from exc
-    finally:
-        os.umask(previous_umask)
-
-    try:
-        directory_metadata = directory.lstat()
-    except OSError as exc:
-        raise _language_io_error(directory, exc) from exc
-    if (
-        stat.S_ISLNK(directory_metadata.st_mode)
-        or not stat.S_ISDIR(directory_metadata.st_mode)
-        or directory_metadata.st_uid != os.geteuid()
-        or directory_metadata.st_mode & 0o022
-    ):
-        raise LanguageSelectionError("language_directory_unsafe", value=str(directory))
     if path.exists() or path.is_symlink():
         _validate_saved_language_metadata(path, missing_ok=False)
 
-    descriptor: int | None = None
-    temporary_path: Path | None = None
     try:
-        descriptor, temporary_name = tempfile.mkstemp(
-            prefix=".language.",
-            suffix=".tmp",
-            dir=directory,
-            text=True,
-        )
-        temporary_path = Path(temporary_name)
-        os.fchmod(descriptor, 0o600)
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
-            descriptor = None
-            stream.write(f"{language}\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary_path, path)
-        temporary_path = None
-        os.chmod(path, 0o600)
+        atomic_write_bytes(path, f"{language}\n".encode())
     except OSError as exc:
-        if descriptor is not None:
-            os.close(descriptor)
-        if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
         raise _language_io_error(path, exc) from exc
     return path
 
@@ -874,7 +942,7 @@ def delete_saved_language(
 ) -> Path | None:
     """Rimuove la preferenza salvata; l'operazione è idempotente."""
     path = default_language_path(environ=environ)
-    if not _validate_saved_language_metadata(path, missing_ok=True):
+    if _validate_saved_language_metadata(path, missing_ok=True) is None:
         return None
     try:
         path.unlink()
@@ -950,7 +1018,7 @@ def resolve_language(
     return resolve_language_preference(argv, environ=environ).language
 
 
-def _language_io_error(path: Path, error: OSError) -> LanguageSelectionError:
+def _language_io_error(path: Path, error: Exception) -> LanguageSelectionError:
     return LanguageSelectionError("language_io_error", value=f"{path}: {error}")
 
 

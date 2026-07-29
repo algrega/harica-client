@@ -28,13 +28,23 @@ directly to a pull request.
 
 ### Development setup
 
-Python 3.11 or later and a POSIX-compatible operating system are required. Linux
-and macOS are tested in CI; Windows is not currently supported. The project
+Python 3.11 or later is required. CI tests Linux and Windows with Python 3.11–3.14
+and macOS with Python 3.14. Initial Windows support is x64 only. The project
 deliberately has no external runtime dependencies.
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e .
+python -m pip install ruff==0.15.22
+```
+
+PowerShell:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -e .
 python -m pip install ruff==0.15.22
@@ -55,7 +65,9 @@ python -m pip wheel . --no-deps --wheel-dir dist
 
 Tests must not contact HARICA or require a real API key. Add or update tests for
 behavioral changes, and update both README variants when user-facing behavior or
-requirements change.
+requirements change. POSIX permission tests must stay on POSIX runners; Windows
+storage tests must exercise APPDATA/LOCALAPPDATA, DPAPI, and reparse-point validation
+without requiring elevated privileges.
 
 ### Pull requests
 
@@ -86,13 +98,23 @@ direttamente con una pull request.
 
 ### Ambiente di sviluppo
 
-Sono richiesti Python 3.11 o successivo e un sistema operativo compatibile POSIX.
-Linux e macOS vengono verificati in CI; Windows non è attualmente supportato. Il
-progetto non ha dipendenze runtime esterne.
+È richiesto Python 3.11 o successivo. La CI verifica Linux e Windows con Python
+3.11–3.14 e macOS con Python 3.14. Il supporto Windows iniziale è limitato a x64.
+Il progetto non ha dipendenze runtime esterne.
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e .
+python -m pip install ruff==0.15.22
+```
+
+PowerShell:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -e .
 python -m pip install ruff==0.15.22
@@ -113,7 +135,10 @@ python -m pip wheel . --no-deps --wheel-dir dist
 
 I test non devono contattare HARICA né richiedere API key reali. Aggiungi o
 aggiorna i test per le modifiche di comportamento e modifica entrambi i README
-quando cambiano comportamento o requisiti visibili agli utenti.
+quando cambiano comportamento o requisiti visibili agli utenti. I test dei permessi
+POSIX devono restare sui runner POSIX; i test dello storage Windows devono coprire
+APPDATA/LOCALAPPDATA, DPAPI e la validazione dei reparse point senza richiedere
+privilegi elevati.
 
 ### Pull request
 

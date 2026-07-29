@@ -26,13 +26,13 @@ protected local file, never accepts it as a CLI argument, and explicitly handles
 
 - read-only remote access through HTTP `GET`;
 - authentication through the `X-API-Key` header;
-- separate credentials for each environment, suitable for manual and cron execution;
+- separate credentials for each environment, suitable for manual and scheduled execution;
 - `production`, `staging`, and `development` environments;
 - listing `valid`, `revoked`, `expired`, or all certificates;
 - certificate lookup by serial number;
 - download of the final certificate to an automatic CN-based PEM filename;
 - local filtering by FQDN, `friendlyName`, and email address;
-- optional local JSON cache for repeated offline filtering;
+- optional protected local cache for repeated offline filtering;
 - cache-only summaries, expiration reports, owner breakdowns, and data-quality checks;
 - retries for `429`, `502`, `503`, and `504` with exponential backoff and jitter;
 - HTTPS enforcement and fail-closed handling of authenticated redirects;
@@ -47,12 +47,14 @@ protected local file, never accepts it as a CLI argument, and explicitly handles
 ## Requirements and installation
 
 - Python 3.11 or later;
-- Linux, macOS, or another POSIX-compatible operating system; Windows is not supported;
+- Linux, macOS, another POSIX-compatible operating system, or a supported x64 edition
+  of Windows 10, Windows 11, or Windows Server;
 - a HARICA account with 2FA;
 - the Enterprise Admin role for the implemented endpoints;
 - [an API key created in the HARICA profile](https://guides.harica.gr/docs/Guides/Developer/5.-API-Keys/).
 
-Clone the repository and run the installation from its root directory:
+On Linux, macOS, and other POSIX systems, clone the repository and install it from its
+root directory:
 
 ```bash
 git clone https://github.com/algrega/harica-client.git
@@ -62,6 +64,21 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install .
 ```
+
+On Windows, use PowerShell with an x64 installation of Python 3.11–3.14:
+
+```powershell
+git clone https://github.com/algrega/harica-client.git
+Set-Location harica-client
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install .
+```
+
+If PowerShell blocks activation, either apply an appropriate execution policy for your
+account or invoke `.\.venv\Scripts\python.exe -m pip install .` directly. Windows ARM64
+is not part of the initial supported scope.
 
 For an editable development installation, follow the
 [contribution guidelines](https://github.com/algrega/harica-client/blob/main/CONTRIBUTING.md).
@@ -75,8 +92,11 @@ harica-client language set en
 harica-client language status
 ```
 
-The preference is stored in `${XDG_CONFIG_HOME}/harica-client/language`, or in
-`~/.config/harica-client/language` when `XDG_CONFIG_HOME` is unset. To remove it:
+On POSIX, the preference is stored in
+`${XDG_CONFIG_HOME}/harica-client/language`, or in
+`~/.config/harica-client/language` when `XDG_CONFIG_HOME` is unset. On Windows it is
+stored in `%APPDATA%\harica-client\language`, with an `AppData\Roaming` fallback under
+the current user profile. To remove it:
 
 ```bash
 harica-client language reset
@@ -109,11 +129,11 @@ harica-client auth set --environment production
 harica-client auth status --environment production
 ```
 
-`auth set` stores the key locally. `auth status` reports the selected source and, for a
-file, validates its existence, ownership, and permissions. Neither command contacts
-HARICA or verifies whether the key is currently valid.
+`auth set` stores the key locally. `auth status` reports the selected source and validates
+the selected file using the platform's security rules. Neither command contacts HARICA
+or verifies whether the key is currently valid.
 
-The default path is:
+On POSIX, the default path is:
 
 ```text
 ${XDG_CONFIG_HOME}/harica-client/credentials/{environment}.key
@@ -129,6 +149,20 @@ The directory is created with mode `0700` and the file with mode `0600`. Reading
 shared directories, symbolic links, non-regular files, files owned by another user,
 group/other permissions, and empty files.
 
+On Windows, the default path is:
+
+```text
+%APPDATA%\harica-client\credentials\{environment}.key.dpapi
+```
+
+If `APPDATA` is unavailable, the client falls back to `AppData\Roaming` under the
+current user profile. `auth set` always writes a versioned DPAPI container, encrypted
+and authenticated for the current Windows user on the current computer. A manually
+created plaintext key file is deliberately rejected: import the key with `auth set`, or
+use `HARICA_API_KEY` only for an ephemeral automation environment. Relative paths,
+UNC/device paths, alternate data streams, symbolic links, junctions, and other reparse
+points are rejected for protected files.
+
 A separate key can be stored for each environment:
 
 ```bash
@@ -143,6 +177,14 @@ To use an explicitly managed path:
 harica-client auth set \
   --environment production \
   --api-key-file /home/harica/secrets/production.key
+```
+
+PowerShell equivalent:
+
+```powershell
+harica-client auth set `
+  --environment production `
+  --api-key-file "$env:APPDATA\harica-client\credentials\production.key.dpapi"
 ```
 
 The explicit path can also be supplied through `HARICA_API_KEY_FILE`, which contains
@@ -176,7 +218,7 @@ harica-client auth delete --environment production --yes
 Deleting the local copy does not revoke the key in HARICA Certificate Manager. Revoke
 the key in the portal if it may have been compromised.
 
-### Cron execution
+### Scheduled execution on POSIX (cron)
 
 Use a dedicated, unprivileged service account. Example crontab:
 
@@ -210,6 +252,35 @@ of silently contacting HARICA when the cache is missing, invalid, or too old.
 Do not store the key in `.zshrc`, `.profile`, crontab, CLI arguments, or repository files.
 `HARICA_API_KEY` remains useful for ephemeral automation, such as a temporary CI job,
 but is not recommended for persistent server configuration.
+
+### Scheduled execution on Windows (Task Scheduler)
+
+First run `auth set` interactively as the same Windows account that will own the task:
+
+```powershell
+harica-client auth set --environment production
+harica-client auth status --environment production
+```
+
+In Task Scheduler, use that account even when the task runs without an interactive
+session. Configure **Program/script** as the virtual-environment executable, for example
+`C:\Tools\harica-client\.venv\Scripts\harica-client.exe`, and set **Add arguments** to:
+
+```text
+cache refresh --environment production
+```
+
+Set **Start in** to the repository or installation directory. Create a separate action
+or task for a cache-based export, for example:
+
+```text
+list --from-cache --max-cache-age 24 --status valid --csv C:\Harica\Exports\valid-certificates.csv --force
+```
+
+Do not put the API key in arguments, PowerShell scripts, batch files, or the task
+definition. DPAPI deliberately ties the protected key and cache to the same user and
+computer, so a task running under another account cannot decrypt them. Ensure the task's
+account can write the chosen export and log directories.
 
 ## Usage
 
@@ -276,8 +347,10 @@ harica-client cache refresh --environment production
 harica-client cache status --environment production
 ```
 
-`cache refresh` queries `valid`, `revoked`, and `expired` once and stores a versioned JSON
-snapshot. Subsequent reads are completely local and do not require an API key:
+`cache refresh` queries `valid`, `revoked`, and `expired` once and stores a logical
+version-1 JSON snapshot. On Windows, the JSON is wrapped in a versioned DPAPI container
+before it reaches disk. Subsequent reads are completely local and do not require an API
+key:
 
 ```bash
 harica-client list --from-cache --status valid
@@ -294,17 +367,23 @@ falling back to the network, use:
 harica-client list --from-cache --max-cache-age 24 --status valid
 ```
 
-Default locations are
+POSIX default locations are
 `${XDG_CACHE_HOME}/harica-client/certificates/{environment}.json` or
-`~/.cache/harica-client/certificates/{environment}.json`. Override the path with
-`--cache-file PATH` or `HARICA_CLIENT_CACHE_FILE`; the flag has precedence. A custom
+`~/.cache/harica-client/certificates/{environment}.json`. The Windows default is
+`%LOCALAPPDATA%\harica-client\certificates\{environment}.json.dpapi`, with an
+`AppData\Local` fallback under the current user profile. Override the path with
+`--cache-file PATH` or `HARICA_CLIENT_CACHE_FILE`; the flag has precedence. Windows
+overrides must be absolute local paths and are still DPAPI-protected. A custom
 `--base-url` on `cache refresh` requires an explicit `--cache-file`.
 
-Cache directories are created with mode `0700` and files with mode `0600`. Symlinks,
-wrong ownership, and group/other access are rejected. Writes are atomic, so a failed
-refresh preserves the previous snapshot. The API key and the potentially large
-`certificate` field are never stored, but the cache can contain sensitive hostnames and
-email addresses. Keep it outside repositories and shared directories.
+On POSIX, cache directories are created with mode `0700` and files with mode `0600`;
+symlinks, wrong ownership, and group/other access are rejected. On Windows, the cache is
+encrypted and authenticated with user-scoped DPAPI, and links, junctions, reparse points,
+relative paths, UNC/device paths, and alternate data streams are rejected. Writes are
+atomic on every platform, so a failed refresh preserves the previous snapshot. The API
+key and the potentially large `certificate` field are never stored, but the decrypted
+cache can contain sensitive hostnames and email addresses. Keep exports outside
+repositories and shared directories.
 
 Remove it explicitly with:
 
@@ -460,9 +539,10 @@ The summary is human-readable output and is not a stable machine-data format.
 
 Without `--output`, the filename is built from the certificate subject CN and saved in
 the current directory. Wildcard CNs such as `*.example.org` become
-`wildcard.example.org.pem`; unsafe filesystem characters are replaced. If there is no
-usable CN, the certificate serial number is used. Multiple different CN values require
-an explicit `--output`.
+`wildcard.example.org.pem`; unsafe filesystem characters are replaced. Windows reserved
+names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, and `LPT1`–`LPT9`) are prefixed, and
+automatic names never end in a dot or space. If there is no usable CN, the certificate
+serial number is used. Multiple different CN values require an explicit `--output`.
 
 `download` always performs a live, point lookup and therefore requires an API key. It
 does not use the local cache, which deliberately excludes certificate contents. It uses
@@ -471,7 +551,7 @@ the connection options documented above.
 Only one final certificate is written: chains, PKCS#7/PKCS#12 data, private keys,
 concatenated certificates, and malformed values are rejected. HARICA may return PEM or
 base64-encoded DER; the saved file is normalized to PEM with LF line endings, a final
-newline, and mode `0644`.
+newline, and mode `0644` on POSIX.
 
 Use `--output` to choose a different name or directory. An existing regular file is
 preserved unless `--force` is supplied; symbolic links and non-regular destinations are
@@ -547,7 +627,8 @@ The CLI exits with code `75` while the rate limit remains active. Ordinary error
 ## Tests
 
 Tests use simulated HTTP transports and a temporary loopback HTTP server. They never
-contact HARICA:
+contact HARICA. CI runs the suite with `ResourceWarning` treated as errors on Python
+3.11–3.14 under Linux and Windows, plus Python 3.14 on macOS:
 
 ```bash
 python -m unittest discover -s tests -v
@@ -582,7 +663,9 @@ Official references:
 
 The project implements only the four `GET` endpoints listed above. It does not implement
 certificate issuance, request approval or cancellation, certificate revocation, or any
-other remote write operation.
+other remote write operation. Initial Windows support is limited to x64; Windows ARM64,
+sharing DPAPI-protected files across users or computers, and automatic migration of
+experimental Windows files are out of scope.
 
 ## License
 

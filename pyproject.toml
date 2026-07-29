@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "harica-client"
-version = "0.17.2"
+version = "0.18.0"
 description = "Unofficial read-only Python client and CLI for the HARICA Certificate Manager API"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -21,6 +21,9 @@ classifiers = [
   "Operating System :: MacOS",
   "Operating System :: POSIX",
   "Operating System :: Unix",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: Microsoft :: Windows :: Windows 10",
+  "Operating System :: Microsoft :: Windows :: Windows 11",
 ]
 dependencies = []
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import stat
 import tempfile
 import unittest
@@ -13,7 +14,11 @@ from unittest.mock import patch
 from harica_client import HaricaClient
 from harica_client.cache import write_cache
 from harica_client.cli import _render_or_export, main
-from harica_client.credentials import read_api_key_file, write_api_key_file
+from harica_client.credentials import (
+    default_api_key_path,
+    read_api_key_file,
+    write_api_key_file,
+)
 from harica_client.errors import HaricaConfigurationError
 from harica_client.i18n import (
     LanguageSelectionError,
@@ -26,11 +31,16 @@ from harica_client.i18n import (
 
 
 class InternationalizationTests(unittest.TestCase):
+    def _platform_environment(self, directory: str) -> dict[str, str]:
+        if os.name == "nt":
+            return {"APPDATA": directory, "LOCALAPPDATA": directory}
+        return {"HOME": directory}
+
     def _help(self, arguments: list[str], environment: dict[str, str] | None = None) -> str:
         output = io.StringIO()
         errors = io.StringIO()
         with tempfile.TemporaryDirectory() as directory:
-            selected_environment = {"HOME": directory}
+            selected_environment = self._platform_environment(directory)
             selected_environment.update(environment or {})
             with (
                 patch.dict("os.environ", selected_environment, clear=True),
@@ -70,7 +80,7 @@ class InternationalizationTests(unittest.TestCase):
 
     def test_persistent_language_lifecycle(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            environment = {"HOME": directory}
+            environment = self._platform_environment(directory)
             output = io.StringIO()
             with (
                 patch.dict("os.environ", environment, clear=True),
@@ -82,8 +92,9 @@ class InternationalizationTests(unittest.TestCase):
             path = default_language_path(environ=environment)
             self.assertEqual((set_code, status_code), (0, 0))
             self.assertEqual(path.read_text(encoding="utf-8"), "en\n")
-            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
-            self.assertEqual(stat.S_IMODE(path.parent.stat().st_mode), 0o700)
+            if os.name != "nt":
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+                self.assertEqual(stat.S_IMODE(path.parent.stat().st_mode), 0o700)
             self.assertIn("Default language saved", output.getvalue())
             self.assertIn("Language: en", output.getvalue())
             self.assertIn("Source: saved preference", output.getvalue())
@@ -103,7 +114,7 @@ class InternationalizationTests(unittest.TestCase):
 
     def test_language_precedence_includes_saved_preference(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            environment = {"HOME": directory}
+            environment = self._platform_environment(directory)
             write_saved_language("en", environ=environment)
 
             saved = resolve_language_preference(["version"], environ=environment)
@@ -123,6 +134,7 @@ class InternationalizationTests(unittest.TestCase):
         )
         self.assertEqual((from_flag.language, from_flag.source), ("en", "flag"))
 
+    @unittest.skipIf(os.name == "nt", "test specifico per XDG/POSIX")
     def test_saved_language_uses_xdg_path(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             environment = {"XDG_CONFIG_HOME": directory}
@@ -132,9 +144,20 @@ class InternationalizationTests(unittest.TestCase):
         self.assertEqual(path, Path(directory) / "harica-client/language")
         self.assertEqual(preference.language, "en")
 
+    @unittest.skipUnless(os.name == "nt", "test specifico per Windows")
+    def test_saved_language_uses_appdata_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {"APPDATA": directory}
+            path = write_saved_language("en", environ=environment)
+            preference = resolve_language_preference([], environ=environment)
+
+        self.assertEqual(path, Path(directory) / "harica-client/language")
+        self.assertEqual(preference.language, "en")
+
+    @unittest.skipIf(os.name == "nt", "permessi POSIX")
     def test_unsafe_saved_language_file_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            environment = {"HOME": directory}
+            environment = self._platform_environment(directory)
             path = default_language_path(environ=environment)
             path.parent.mkdir(mode=0o700, parents=True)
             path.write_text("en\n", encoding="utf-8")
@@ -145,7 +168,7 @@ class InternationalizationTests(unittest.TestCase):
 
     def test_explicit_override_can_repair_invalid_saved_language(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            environment = {"HOME": directory}
+            environment = self._platform_environment(directory)
             path = default_language_path(environ=environment)
             path.parent.mkdir(mode=0o700, parents=True)
             path.write_text("invalid\n", encoding="utf-8")
@@ -351,13 +374,13 @@ class InternationalizationTests(unittest.TestCase):
     def test_clean_cron_environment_uses_english(self) -> None:
         output = io.StringIO()
         with tempfile.TemporaryDirectory() as directory:
-            key = Path(directory) / ".config/harica-client/credentials/production.key"
-            write_api_key_file(key, "cron-secret")
             cron_environment = {
-                "HOME": directory,
-                "PATH": "/usr/bin:/bin",
+                **self._platform_environment(directory),
+                "PATH": os.environ.get("PATH", ""),
                 "HARICA_CLIENT_LANGUAGE": "en",
             }
+            key = default_api_key_path("production", environ=cron_environment)
+            write_api_key_file(key, "cron-secret")
             with (
                 patch.dict("os.environ", cron_environment, clear=True),
                 redirect_stdout(output),
