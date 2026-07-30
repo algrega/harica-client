@@ -43,12 +43,17 @@ python -m pip install ruff==0.15.22
 PowerShell:
 
 ```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -e .
-python -m pip install ruff==0.15.22
+py --list
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m pip install ruff==0.15.22
 ```
+
+Confirm that the default shown by `py --list` is an x64 Python from 3.11 through
+3.14, or select an installed supported version explicitly, for example with
+`py -3.14 -m venv .venv`. Direct invocation avoids PowerShell activation-policy
+restrictions.
 
 Create a focused branch from the current `main`. Keep unrelated changes out of
 the same pull request.
@@ -61,6 +66,14 @@ Before opening a pull request, run:
 python -W error::ResourceWarning -m unittest discover -s tests -v
 ruff check .
 python -m pip wheel . --no-deps --wheel-dir dist
+```
+
+PowerShell without activation:
+
+```powershell
+.\.venv\Scripts\python.exe -W error::ResourceWarning -m unittest discover -s tests -v
+.\.venv\Scripts\ruff.exe check .
+.\.venv\Scripts\python.exe -m pip wheel . --no-deps --wheel-dir dist
 ```
 
 Tests must not contact HARICA or require a real API key. Add or update tests for
@@ -113,12 +126,17 @@ python -m pip install ruff==0.15.22
 PowerShell:
 
 ```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -e .
-python -m pip install ruff==0.15.22
+py --list
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m pip install ruff==0.15.22
 ```
+
+Verifica che la versione predefinita mostrata da `py --list` sia Python x64 dalla
+3.11 alla 3.14, oppure seleziona esplicitamente una versione supportata installata,
+per esempio con `py -3.14 -m venv .venv`. L'esecuzione diretta evita le restrizioni
+della policy di attivazione di PowerShell.
 
 Crea un branch dedicato a partire dal `main` aggiornato e non includere nella
 stessa pull request modifiche non correlate.
@@ -131,6 +149,14 @@ Prima di aprire una pull request esegui:
 python -W error::ResourceWarning -m unittest discover -s tests -v
 ruff check .
 python -m pip wheel . --no-deps --wheel-dir dist
+```
+
+PowerShell senza attivazione:
+
+```powershell
+.\.venv\Scripts\python.exe -W error::ResourceWarning -m unittest discover -s tests -v
+.\.venv\Scripts\ruff.exe check .
+.\.venv\Scripts\python.exe -m pip wheel . --no-deps --wheel-dir dist
 ```
 
 I test non devono contattare HARICA né richiedere API key reali. Aggiungi o

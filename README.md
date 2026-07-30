@@ -70,15 +70,29 @@ On Windows, use PowerShell with an x64 installation of Python 3.11–3.14:
 ```powershell
 git clone https://github.com/algrega/harica-client.git
 Set-Location harica-client
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install .
+py --list
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install .
+.\.venv\Scripts\harica-client.exe version
 ```
 
-If PowerShell blocks activation, either apply an appropriate execution policy for your
-account or invoke `.\.venv\Scripts\python.exe -m pip install .` directly. Windows ARM64
-is not part of the initial supported scope.
+Before creating the environment, confirm that the version marked as the default by
+`py --list` is an x64 Python from 3.11 through 3.14. If several supported versions are
+installed, select one explicitly, for example with `py -3.14 -m venv .venv`.
+Activation is optional: invoking the environment's executables directly, as above,
+also avoids PowerShell execution-policy restrictions. If activation is preferred and
+local policy permits it, use:
+
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+.\.venv\Scripts\Activate.ps1
+```
+
+The policy change lasts only for the current PowerShell process. The examples below use
+the shorter `harica-client` command; without activation, invoke
+`.\.venv\Scripts\harica-client.exe` instead. Windows ARM64 is not part of the initial
+supported scope.
 
 For an editable development installation, follow the
 [contribution guidelines](https://github.com/algrega/harica-client/blob/main/CONTRIBUTING.md).
