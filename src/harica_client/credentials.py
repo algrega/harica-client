@@ -1,16 +1,26 @@
-"""Gestione portabile delle credenziali HARICA su filesystem POSIX."""
+"""Gestione multipiattaforma delle credenziali HARICA."""
 
 from __future__ import annotations
 
 import os
-import stat
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
 from .errors import HaricaConfigurationError
 from .i18n import tr
+from .platform_storage import (
+    IS_WINDOWS,
+    StoragePathError,
+    atomic_write_bytes,
+    config_root,
+    ensure_private_directory,
+    read_stable_bytes,
+    storage_path,
+    validate_private_directory,
+    validate_private_file,
+)
+from .windows_dpapi import DpapiError, protect, unprotect
 
 API_KEY_ENV = "HARICA_API_KEY"
 API_KEY_FILE_ENV = "HARICA_API_KEY_FILE"
@@ -49,19 +59,14 @@ def default_api_key_path(
     *,
     environ: Mapping[str, str] | None = None,
 ) -> Path:
-    """Restituisce il percorso XDG predefinito per un ambiente HARICA."""
+    """Restituisce il percorso predefinito nativo della piattaforma."""
     current = os.environ if environ is None else environ
-    xdg_config_home = current.get("XDG_CONFIG_HOME", "").strip()
-    if xdg_config_home:
-        root = Path(xdg_config_home).expanduser()
-        if not root.is_absolute():
-            raise HaricaConfigurationError(tr("absolute_xdg"))
-    else:
-        configured_home = current.get("HOME", "").strip()
-        root = (Path(configured_home).expanduser() if configured_home else Path.home()) / ".config"
-        if not root.is_absolute():
-            raise HaricaConfigurationError(tr("absolute_home"))
-    return _absolute_path(root / "harica-client" / "credentials" / f"{environment}.key")
+    try:
+        root = config_root(current)
+    except StoragePathError as exc:
+        raise _root_configuration_error(exc) from exc
+    suffix = ".key.dpapi" if IS_WINDOWS else ".key"
+    return root / "harica-client" / "credentials" / f"{environment}{suffix}"
 
 
 def select_credential_location(
@@ -73,14 +78,20 @@ def select_credential_location(
     """Seleziona la sorgente senza leggere né mostrare il segreto."""
     current = os.environ if environ is None else environ
     if explicit_path is not None:
-        return CredentialLocation(source="--api-key-file", path=_absolute_path(explicit_path))
+        return CredentialLocation(
+            source="--api-key-file",
+            path=_validated_storage_path(explicit_path),
+        )
     if API_KEY_ENV in current:
         return CredentialLocation(source=API_KEY_ENV, direct_value=current[API_KEY_ENV])
     if API_KEY_FILE_ENV in current:
         configured = current[API_KEY_FILE_ENV].strip()
         if not configured:
             raise HaricaConfigurationError(tr("env_empty", name=API_KEY_FILE_ENV))
-        return CredentialLocation(source=API_KEY_FILE_ENV, path=_absolute_path(configured))
+        return CredentialLocation(
+            source=API_KEY_FILE_ENV,
+            path=_validated_storage_path(configured),
+        )
     preferred = default_api_key_path(environment, environ=current)
     return CredentialLocation(source=tr("default_file"), path=preferred)
 
@@ -94,12 +105,12 @@ def credential_destination(
     """Seleziona la destinazione per set/delete, ignorando HARICA_API_KEY."""
     current = os.environ if environ is None else environ
     if explicit_path is not None:
-        return _absolute_path(explicit_path)
+        return _validated_storage_path(explicit_path)
     if API_KEY_FILE_ENV in current:
         configured = current[API_KEY_FILE_ENV].strip()
         if not configured:
             raise HaricaConfigurationError(tr("env_empty", name=API_KEY_FILE_ENV))
-        return _absolute_path(configured)
+        return _validated_storage_path(configured)
     return default_api_key_path(environment, environ=current)
 
 
@@ -168,7 +179,9 @@ def inspect_credential(
             detail = tr("environment_variable_set")
         else:
             read_api_key_file(location.path)
-            detail = tr("secure_file_detail")
+            detail = tr(
+                "dpapi_file_detail" if IS_WINDOWS else "secure_file_detail"
+            )
     except HaricaConfigurationError as exc:
         return CredentialStatus(False, location.source, location.path, str(exc))
 
@@ -176,12 +189,21 @@ def inspect_credential(
 
 
 def read_api_key_file(path: Path | str) -> str:
-    """Legge un file segreto dopo controlli POSIX stretti."""
-    target = _absolute_path(path)
-    _validate_secret_file_metadata(target)
+    """Legge un file segreto validato e, su Windows, protetto con DPAPI."""
+    target = _validated_storage_path(path)
+    metadata = _validate_secret_file_metadata(target)
     try:
-        api_key = target.read_text(encoding="utf-8").strip()
-    except OSError as exc:
+        content = read_stable_bytes(target, metadata)
+        if IS_WINDOWS:
+            content = unprotect(content, purpose="api-key")
+        api_key = content.decode("utf-8").strip()
+    except StoragePathError as exc:
+        raise HaricaConfigurationError(
+            tr("api_key_changed_during_read", path=target)
+        ) from exc
+    except DpapiError as exc:
+        raise _dpapi_configuration_error(exc, path=target, operation="read") from exc
+    except (OSError, UnicodeError) as exc:
         raise HaricaConfigurationError(
             tr("api_key_read_failed", path=target, error=exc)
         ) from exc
@@ -191,51 +213,35 @@ def read_api_key_file(path: Path | str) -> str:
 
 
 def write_api_key_file(path: Path | str, api_key: str) -> Path:
-    """Crea o ruota una chiave con scrittura atomica e permessi 0600."""
+    """Crea o ruota una chiave con una scrittura atomica sicura."""
     secret = api_key.strip()
     if not secret:
         raise HaricaConfigurationError(tr("api_key_empty"))
 
-    target = _absolute_path(path)
+    target = _validated_storage_path(path)
     _ensure_secure_directory(target.parent)
     if target.exists() or target.is_symlink():
         _validate_secret_file_metadata(target)
 
-    descriptor: int | None = None
-    temporary_path: Path | None = None
     try:
-        descriptor, temporary_name = tempfile.mkstemp(
-            prefix=f".{target.name}.",
-            suffix=".tmp",
-            dir=target.parent,
-            text=True,
-        )
-        temporary_path = Path(temporary_name)
-        os.fchmod(descriptor, 0o600)
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
-            descriptor = None
-            stream.write(secret)
-            stream.write("\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary_path, target)
-        temporary_path = None
-        os.chmod(target, 0o600)
+        content = secret.encode("utf-8")
+        if IS_WINDOWS:
+            content = protect(content, purpose="api-key")
+        else:
+            content += b"\n"
+        atomic_write_bytes(target, content)
+    except DpapiError as exc:
+        raise _dpapi_configuration_error(exc, path=target, operation="write") from exc
     except OSError as exc:
-        if descriptor is not None:
-            os.close(descriptor)
-        if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
         raise HaricaConfigurationError(
             tr("api_key_write_failed", path=target, error=exc)
         ) from exc
-
     return target
 
 
 def delete_api_key_file(path: Path | str) -> Path:
     """Elimina solo un file segreto valido, senza rimuovere la directory."""
-    target = _absolute_path(path)
+    target = _validated_storage_path(path)
     _validate_secret_file_metadata(target)
     try:
         target.unlink()
@@ -246,63 +252,94 @@ def delete_api_key_file(path: Path | str) -> Path:
     return target
 
 
-def _absolute_path(path: Path | str) -> Path:
-    return Path(os.path.abspath(os.path.expanduser(str(path))))
-
-
-def _validate_secret_file_metadata(path: Path) -> None:
+def _validated_storage_path(path: Path | str) -> Path:
     try:
-        metadata = path.lstat()
+        return storage_path(path)
+    except StoragePathError as exc:
+        keys = {
+            "windows_path_not_absolute": "windows_path_not_absolute",
+            "windows_path_not_local": "windows_path_not_local",
+            "reparse": "api_key_reparse",
+        }
+        key = keys.get(exc.reason, "windows_path_not_local")
+        raise HaricaConfigurationError(tr(key, path=exc.path)) from exc
+
+
+def _root_configuration_error(error: StoragePathError) -> HaricaConfigurationError:
+    keys = {
+        "config_root_not_absolute": (
+            "windows_config_absolute" if IS_WINDOWS else "absolute_xdg"
+        ),
+        "home_not_absolute": "absolute_home",
+    }
+    return HaricaConfigurationError(
+        tr(keys.get(error.reason, "windows_config_absolute"))
+    )
+
+
+def _validate_secret_file_metadata(path: Path):
+    try:
+        metadata = validate_private_file(path)
+        validate_private_directory(path.parent)
+        return metadata
     except FileNotFoundError as exc:
         raise HaricaConfigurationError(tr("api_key_file_missing", path=path)) from exc
+    except StoragePathError as exc:
+        keys = {
+            "reparse": "api_key_reparse",
+            "not_regular": "api_key_not_regular",
+            "wrong_owner": "api_key_wrong_owner",
+            "permissions": "api_key_permissions",
+            "not_readable": "api_key_not_readable",
+            "unsafe_directory": "credential_dir_unsafe",
+        }
+        key = keys.get(exc.reason, "api_key_file_check_failed")
+        values = {"path": exc.path}
+        if exc.mode is not None:
+            values["mode"] = exc.mode
+        if key == "api_key_file_check_failed":
+            values["error"] = exc.reason
+        raise HaricaConfigurationError(tr(key, **values)) from exc
     except OSError as exc:
         raise HaricaConfigurationError(
             tr("api_key_file_check_failed", path=path, error=exc)
         ) from exc
 
-    if stat.S_ISLNK(metadata.st_mode):
-        raise HaricaConfigurationError(tr("api_key_symlink", path=path))
-    if not stat.S_ISREG(metadata.st_mode):
-        raise HaricaConfigurationError(tr("api_key_not_regular", path=path))
-    if metadata.st_uid != os.geteuid():
-        raise HaricaConfigurationError(tr("api_key_wrong_owner", path=path))
-    if metadata.st_mode & 0o077:
-        mode = stat.S_IMODE(metadata.st_mode)
-        raise HaricaConfigurationError(
-            tr("api_key_permissions", path=path, mode=mode)
-        )
-    if not metadata.st_mode & stat.S_IRUSR:
-        raise HaricaConfigurationError(tr("api_key_not_readable", path=path))
-    _validate_secret_directory_metadata(path.parent)
-
 
 def _ensure_secure_directory(path: Path) -> None:
-    previous_umask = os.umask(0o077)
     try:
-        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        ensure_private_directory(path)
+    except StoragePathError as exc:
+        keys = {
+            "unsafe_directory": "credential_dir_unsafe",
+            "wrong_owner": "credential_dir_wrong_owner",
+            "permissions": "credential_dir_permissions",
+        }
+        key = keys.get(exc.reason, "credential_dir_check_failed")
+        values = {"path": exc.path}
+        if exc.mode is not None:
+            values["mode"] = exc.mode
+        if key == "credential_dir_check_failed":
+            values["error"] = exc.reason
+        raise HaricaConfigurationError(tr(key, **values)) from exc
     except OSError as exc:
         raise HaricaConfigurationError(
             tr("credential_dir_create_failed", path=path, error=exc)
         ) from exc
-    finally:
-        os.umask(previous_umask)
-
-    _validate_secret_directory_metadata(path)
 
 
-def _validate_secret_directory_metadata(path: Path) -> None:
-    try:
-        metadata = path.lstat()
-    except OSError as exc:
-        raise HaricaConfigurationError(
-            tr("credential_dir_check_failed", path=path, error=exc)
-        ) from exc
-    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
-        raise HaricaConfigurationError(tr("credential_dir_unsafe", path=path))
-    if metadata.st_uid != os.geteuid():
-        raise HaricaConfigurationError(tr("credential_dir_wrong_owner", path=path))
-    if metadata.st_mode & 0o077:
-        mode = stat.S_IMODE(metadata.st_mode)
-        raise HaricaConfigurationError(
-            tr("credential_dir_permissions", path=path, mode=mode)
+def _dpapi_configuration_error(
+    error: DpapiError,
+    *,
+    path: Path,
+    operation: str,
+) -> HaricaConfigurationError:
+    if error.reason == "invalid_format":
+        return HaricaConfigurationError(tr("dpapi_api_key_invalid_format", path=path))
+    if operation == "write":
+        return HaricaConfigurationError(
+            tr("dpapi_protect_failed", path=path, error=error)
         )
+    return HaricaConfigurationError(
+        tr("dpapi_unprotect_failed", path=path, error=error)
+    )

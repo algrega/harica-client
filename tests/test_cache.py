@@ -19,6 +19,7 @@ from harica_client.cache import (
     write_cache,
 )
 from harica_client.errors import HaricaConfigurationError
+from harica_client.windows_dpapi import protect, unprotect
 
 
 class CacheTests(unittest.TestCase):
@@ -39,6 +40,21 @@ class CacheTests(unittest.TestCase):
             now=now or self.NOW,
         )
 
+    def _read_payload(self, target: Path) -> dict[str, object]:
+        raw = target.read_bytes()
+        if os.name == "nt":
+            raw = unprotect(raw, purpose="cache")
+        return json.loads(raw.decode("utf-8"))
+
+    def _write_payload(self, target: Path, payload: dict[str, object]) -> None:
+        raw = json.dumps(payload).encode("utf-8")
+        if os.name == "nt":
+            raw = protect(raw, purpose="cache")
+        target.write_bytes(raw)
+        if os.name != "nt":
+            target.chmod(0o600)
+
+    @unittest.skipIf(os.name == "nt", "test specifico per XDG/POSIX")
     def test_default_path_uses_xdg_and_environment(self) -> None:
         path = default_cache_path(
             "staging",
@@ -49,6 +65,7 @@ class CacheTests(unittest.TestCase):
             Path("/srv/harica-cache/harica-client/certificates/staging.json"),
         )
 
+    @unittest.skipIf(os.name == "nt", "test specifico per HOME/POSIX")
     def test_default_path_falls_back_to_home(self) -> None:
         path = default_cache_path("production", environ={"HOME": "/home/harica"})
         self.assertEqual(
@@ -56,6 +73,22 @@ class CacheTests(unittest.TestCase):
             Path("/home/harica/.cache/harica-client/certificates/production.json"),
         )
 
+    @unittest.skipUnless(os.name == "nt", "test specifico per Windows")
+    def test_default_windows_path_uses_localappdata_and_dpapi_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = default_cache_path(
+                "staging",
+                environ={"LOCALAPPDATA": directory},
+            )
+        self.assertEqual(
+            path,
+            Path(directory)
+            / "harica-client"
+            / "certificates"
+            / "staging.json.dpapi",
+        )
+
+    @unittest.skipIf(os.name == "nt", "percorsi di esempio POSIX")
     def test_cache_path_precedence(self) -> None:
         explicit = resolve_cache_path(
             "production",
@@ -74,6 +107,31 @@ class CacheTests(unittest.TestCase):
             Path("/home/test/.cache/harica-client/certificates/production.json"),
         )
 
+    @unittest.skipUnless(os.name == "nt", "test specifico per Windows")
+    def test_windows_cache_path_precedence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            explicit_path = root / "explicit.json.dpapi"
+            environment_path = root / "environment.json.dpapi"
+            explicit = resolve_cache_path(
+                "production",
+                explicit_path=explicit_path,
+                environ={
+                    CACHE_FILE_ENV: str(environment_path),
+                    "LOCALAPPDATA": directory,
+                },
+            )
+            environment = resolve_cache_path(
+                "production",
+                environ={
+                    CACHE_FILE_ENV: str(environment_path),
+                    "LOCALAPPDATA": directory,
+                },
+            )
+        self.assertEqual(explicit, explicit_path)
+        self.assertEqual(environment, environment_path)
+
+    @unittest.skipIf(os.name == "nt", "test specifico per XDG/POSIX")
     def test_relative_xdg_and_empty_environment_file_are_rejected(self) -> None:
         with self.assertRaises(HaricaConfigurationError):
             default_cache_path(
@@ -95,12 +153,18 @@ class CacheTests(unittest.TestCase):
                 expected_environment="production",
                 now=self.NOW + timedelta(hours=2),
             )
-            payload = json.loads(target.read_text(encoding="utf-8"))
-            directory_mode = stat.S_IMODE(target.parent.stat().st_mode)
-            file_mode = stat.S_IMODE(target.stat().st_mode)
+            payload = self._read_payload(target)
+            raw = target.read_bytes()
+            if os.name != "nt":
+                directory_mode = stat.S_IMODE(target.parent.stat().st_mode)
+                file_mode = stat.S_IMODE(target.stat().st_mode)
 
-        self.assertEqual(directory_mode, 0o700)
-        self.assertEqual(file_mode, 0o600)
+        if os.name != "nt":
+            self.assertEqual(directory_mode, 0o700)
+            self.assertEqual(file_mode, 0o600)
+        else:
+            self.assertNotIn(b'"serial"', raw)
+            self.assertNotIn(b"https://cm.harica.gr", raw)
         self.assertEqual(snapshot.schema_version, 1)
         self.assertEqual(snapshot.statuses, ("valid", "revoked", "expired"))
         self.assertEqual(snapshot.certificates[0]["serial"], "01")
@@ -163,13 +227,13 @@ class CacheTests(unittest.TestCase):
                     now=self.NOW - timedelta(seconds=1),
                 )
 
-            payload = json.loads(target.read_text(encoding="utf-8"))
+            payload = self._read_payload(target)
             payload["statuses"] = ["valid"]
-            target.write_text(json.dumps(payload), encoding="utf-8")
-            target.chmod(0o600)
+            self._write_payload(target, payload)
             with self.assertRaises(HaricaConfigurationError):
                 read_cache(target, expected_environment="production", now=self.NOW)
 
+    @unittest.skipIf(os.name == "nt", "permessi e symlink POSIX")
     def test_symlink_open_permissions_wrong_owner_and_shared_directory_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -186,7 +250,10 @@ class CacheTests(unittest.TestCase):
                 read_cache(safe, expected_environment="production", now=self.NOW)
             safe.chmod(0o600)
 
-            with patch("harica_client.cache.os.geteuid", return_value=os.geteuid() + 1):
+            with patch(
+                "harica_client.platform_storage.os.geteuid",
+                return_value=os.geteuid() + 1,
+            ):
                 with self.assertRaises(HaricaConfigurationError):
                     read_cache(safe, expected_environment="production", now=self.NOW)
 
@@ -200,7 +267,10 @@ class CacheTests(unittest.TestCase):
             self._write_snapshot(target)
             original = target.read_bytes()
 
-            with patch("harica_client.cache.os.replace", side_effect=OSError("failure")):
+            with patch(
+                "harica_client.platform_storage.os.replace",
+                side_effect=OSError("failure"),
+            ):
                 with self.assertRaises(HaricaConfigurationError):
                     write_cache(
                         target,

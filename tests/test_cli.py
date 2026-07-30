@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -10,7 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from harica_client.cache import default_cache_path, write_cache
+from harica_client.cache import default_cache_path, read_cache, write_cache
 from harica_client.cli import (
     _client_from_args,
     _extract_rows,
@@ -29,6 +30,7 @@ from harica_client.errors import (
     HaricaError,
     HaricaRateLimitError,
 )
+from harica_client.credentials import write_api_key_file
 
 
 class CliTests(unittest.TestCase):
@@ -37,7 +39,7 @@ class CliTests(unittest.TestCase):
         with redirect_stdout(output):
             code = main(["version"])
         self.assertEqual(code, 0)
-        self.assertEqual(output.getvalue().strip(), "0.17.2")
+        self.assertEqual(output.getvalue().strip(), "0.18.0")
 
     def test_extract_wrapped_rows(self) -> None:
         self.assertEqual(
@@ -129,7 +131,11 @@ class CliTests(unittest.TestCase):
         with (
             patch.dict(
                 "os.environ",
-                {"FORCE_COLOR": "1", "PYTHON_COLORS": "1"},
+                {
+                    "FORCE_COLOR": "1",
+                    "PYTHON_COLORS": "1",
+                    "HARICA_CLIENT_LANGUAGE": "it",
+                },
                 clear=True,
             ),
             redirect_stderr(errors),
@@ -444,7 +450,11 @@ class CliTests(unittest.TestCase):
             output = io.StringIO()
             errors = io.StringIO()
             with (
-                patch.dict("os.environ", {}, clear=True),
+                patch.dict(
+                    "os.environ",
+                    {"HARICA_CLIENT_LANGUAGE": "it"},
+                    clear=True,
+                ),
                 patch("harica_client.cli.getpass.getpass", side_effect=[secret, secret]),
                 redirect_stdout(output),
                 redirect_stderr(errors),
@@ -485,7 +495,11 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "credentials" / "production.key"
             with (
-                patch.dict("os.environ", {}, clear=True),
+                patch.dict(
+                    "os.environ",
+                    {"HARICA_CLIENT_LANGUAGE": "it"},
+                    clear=True,
+                ),
                 patch(
                     "harica_client.cli.getpass.getpass",
                     side_effect=["first-secret", "second-secret"],
@@ -504,8 +518,7 @@ class CliTests(unittest.TestCase):
     def test_list_and_serial_load_key_file_with_clean_environment(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "production.key"
-            target.write_text("file-secret\n", encoding="utf-8")
-            target.chmod(0o600)
+            write_api_key_file(target, "file-secret")
             parser = build_parser()
 
             for command in (
@@ -524,17 +537,19 @@ class CliTests(unittest.TestCase):
         secret = "environment-secret-not-for-output"
         output = io.StringIO()
         errors = io.StringIO()
-        with tempfile.TemporaryDirectory() as directory:
-            with (
-                patch.dict(
-                    "os.environ",
-                    {"HARICA_API_KEY": secret, "HOME": directory},
-                    clear=True,
-                ),
-                redirect_stdout(output),
-                redirect_stderr(errors),
-            ):
-                code = main(["auth", "status", "--environment", "production"])
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "HARICA_API_KEY": secret,
+                    "HARICA_CLIENT_LANGUAGE": "it",
+                },
+                clear=True,
+            ),
+            redirect_stdout(output),
+            redirect_stderr(errors),
+        ):
+            code = main(["auth", "status", "--environment", "production"])
 
         combined = output.getvalue() + errors.getvalue()
         self.assertEqual(code, 0)
@@ -569,7 +584,11 @@ class CliTests(unittest.TestCase):
                 certificates=rows,
             )
             with (
-                patch.dict("os.environ", {"HOME": directory}, clear=True),
+                patch.dict(
+                    "os.environ",
+                    {"HARICA_CLIENT_LANGUAGE": "it"},
+                    clear=True,
+                ),
                 patch(
                     "harica_client.cli._client_from_args",
                     side_effect=AssertionError("network must not be used"),
@@ -606,8 +625,12 @@ class CliTests(unittest.TestCase):
     def test_clean_cron_environment_exports_default_cache_to_csv(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             environment = {
-                "HOME": directory,
-                "PATH": "/usr/bin:/bin",
+                **(
+                    {"APPDATA": directory, "LOCALAPPDATA": directory}
+                    if os.name == "nt"
+                    else {"HOME": directory}
+                ),
+                "PATH": os.environ.get("PATH", ""),
                 "HARICA_CLIENT_LANGUAGE": "en",
             }
             cache_path = default_cache_path("production", environ=environment)
@@ -696,7 +719,14 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "private" / "production.json"
             with (
-                patch.dict("os.environ", {"HARICA_API_KEY": secret}, clear=True),
+                patch.dict(
+                    "os.environ",
+                    {
+                        "HARICA_API_KEY": secret,
+                        "HARICA_CLIENT_LANGUAGE": "it",
+                    },
+                    clear=True,
+                ),
                 patch("harica_client.cli._client_from_args", return_value=client),
                 redirect_stdout(output),
                 redirect_stderr(io.StringIO()),
@@ -704,14 +734,17 @@ class CliTests(unittest.TestCase):
                 code = main(
                     ["cache", "refresh", "--cache-file", str(target)]
                 )
-            payload = json.loads(target.read_text(encoding="utf-8"))
+            snapshot = read_cache(
+                target,
+                expected_environment="production",
+            )
 
         self.assertEqual(code, 0)
         client.list_certificates.assert_called_once_with("all")
-        self.assertEqual(payload["statuses"], ["valid", "revoked", "expired"])
-        self.assertNotIn("certificate", payload["certificates"][0])
-        self.assertNotIn("certificate", payload["certificates"][0]["nested"])
-        self.assertNotIn(secret, json.dumps(payload))
+        self.assertEqual(snapshot.statuses, ("valid", "revoked", "expired"))
+        self.assertNotIn("certificate", snapshot.certificates[0])
+        self.assertNotIn("certificate", snapshot.certificates[0]["nested"])
+        self.assertNotIn(secret, json.dumps(snapshot.certificates))
         self.assertIn("Cache aggiornata", output.getvalue())
 
     def test_cache_refresh_custom_url_requires_explicit_file(self) -> None:

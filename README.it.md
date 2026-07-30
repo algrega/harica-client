@@ -26,13 +26,13 @@ esplicitamente il rate limit HTTP 429.
 
 - accesso remoto in sola lettura tramite HTTP `GET`;
 - autenticazione tramite header `X-API-Key`;
-- credenziali separate per ambiente, adatte a esecuzioni manuali e cron;
+- credenziali separate per ambiente, adatte a esecuzioni manuali e pianificate;
 - ambienti `production`, `staging` e `development`;
 - elenco certificati `valid`, `revoked`, `expired` oppure di tutti gli stati;
 - ricerca di un certificato per numero seriale;
 - download del certificato finale con nome PEM automatico derivato dal CN;
 - ricerca locale per FQDN, `friendlyName` e indirizzo email;
-- cache JSON locale opzionale per filtri offline ripetuti;
+- cache locale protetta opzionale per filtri offline ripetuti;
 - riepiloghi, scadenze, raggruppamenti e controlli qualità basati solo sulla cache;
 - retry di `429`, `502`, `503` e `504` con backoff esponenziale e jitter;
 - HTTPS obbligatorio e gestione fail-closed dei redirect autenticati;
@@ -47,12 +47,14 @@ esplicitamente il rate limit HTTP 429.
 ## Requisiti e installazione
 
 - Python 3.11 o successivo;
-- Linux, macOS o un altro sistema operativo compatibile POSIX; Windows non è supportato;
+- Linux, macOS, un altro sistema operativo compatibile POSIX oppure un'edizione x64
+  supportata di Windows 10, Windows 11 o Windows Server;
 - account HARICA con 2FA;
 - ruolo Enterprise Admin per gli endpoint implementati;
 - [API key creata nel profilo HARICA](https://guides.harica.gr/docs/Guides/Developer/5.-API-Keys/).
 
-Clona il repository ed esegui l'installazione dalla sua directory principale:
+Su Linux, macOS e gli altri sistemi POSIX, clona il repository ed esegui
+l'installazione dalla sua directory principale:
 
 ```bash
 git clone https://github.com/algrega/harica-client.git
@@ -62,6 +64,34 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install .
 ```
+
+Su Windows usa PowerShell con un'installazione x64 di Python 3.11–3.14:
+
+```powershell
+git clone https://github.com/algrega/harica-client.git
+Set-Location harica-client
+py --list
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install .
+.\.venv\Scripts\harica-client.exe version
+```
+
+Prima di creare l'ambiente, verifica che la versione indicata come predefinita da
+`py --list` sia Python x64 dalla 3.11 alla 3.14. Se sono installate più versioni
+supportate, selezionane una esplicitamente, per esempio con
+`py -3.14 -m venv .venv`. L'attivazione è facoltativa: richiamare direttamente gli
+eseguibili dell'ambiente, come sopra, evita anche le restrizioni dell'execution policy
+di PowerShell. Se preferisci attivarlo e le regole locali lo consentono, esegui:
+
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+.\.venv\Scripts\Activate.ps1
+```
+
+La modifica della policy vale soltanto per il processo PowerShell corrente. Gli esempi
+seguenti usano il comando più breve `harica-client`; senza attivazione, usa invece
+`.\.venv\Scripts\harica-client.exe`. Windows ARM64 non rientra nel supporto iniziale.
 
 Per un'installazione modificabile destinata allo sviluppo, segui le
 [linee guida per contribuire](https://github.com/algrega/harica-client/blob/main/CONTRIBUTING.md).
@@ -75,9 +105,11 @@ harica-client language set en
 harica-client language status
 ```
 
-La preferenza viene memorizzata in `${XDG_CONFIG_HOME}/harica-client/language` oppure,
-se `XDG_CONFIG_HOME` non è definita, in `~/.config/harica-client/language`. Per
-rimuoverla:
+Su POSIX la preferenza viene memorizzata in
+`${XDG_CONFIG_HOME}/harica-client/language` oppure, se `XDG_CONFIG_HOME` non è definita,
+in `~/.config/harica-client/language`. Su Windows viene salvata in
+`%APPDATA%\harica-client\language`, con fallback ad `AppData\Roaming` nel profilo
+dell'utente corrente. Per rimuoverla:
 
 ```bash
 harica-client language reset
@@ -110,11 +142,11 @@ harica-client auth set --environment production
 harica-client auth status --environment production
 ```
 
-`auth set` salva la chiave localmente. `auth status` indica la sorgente selezionata e,
-per un file, ne controlla esistenza, proprietario e permessi. Nessuno dei due comandi
+`auth set` salva la chiave localmente. `auth status` indica la sorgente selezionata e
+valida il file secondo le regole di sicurezza della piattaforma. Nessuno dei due comandi
 contatta HARICA o verifica che la chiave sia attualmente valida.
 
-Il percorso predefinito è:
+Su POSIX il percorso predefinito è:
 
 ```text
 ${XDG_CONFIG_HOME}/harica-client/credentials/{environment}.key
@@ -130,6 +162,20 @@ La directory viene creata con permessi `0700` e il file con `0600`. La lettura r
 directory condivise, link simbolici, file non regolari, proprietario diverso dall'utente
 corrente, permessi per gruppo/altri e file vuoti.
 
+Su Windows il percorso predefinito è:
+
+```text
+%APPDATA%\harica-client\credentials\{environment}.key.dpapi
+```
+
+Se `APPDATA` non è disponibile, il client usa `AppData\Roaming` nel profilo dell'utente
+corrente. `auth set` scrive sempre un contenitore DPAPI versionato, cifrato e autenticato
+per l'utente Windows corrente sul computer corrente. Un file testuale creato manualmente
+viene rifiutato: importa la chiave con `auth set` oppure usa `HARICA_API_KEY` soltanto
+per un ambiente di automazione effimero. Per i file protetti vengono rifiutati percorsi
+relativi, UNC/device path, alternate data stream, link simbolici, junction e altri
+reparse point.
+
 È possibile mantenere una chiave distinta per ciascun ambiente:
 
 ```bash
@@ -144,6 +190,14 @@ Per usare un percorso amministrato esplicitamente:
 harica-client auth set \
   --environment production \
   --api-key-file /home/harica/secrets/production.key
+```
+
+Equivalente PowerShell:
+
+```powershell
+harica-client auth set `
+  --environment production `
+  --api-key-file "$env:APPDATA\harica-client\credentials\production.key.dpapi"
 ```
 
 La directory specificata deve già essere sicura oppure deve poter essere creata dal
@@ -185,7 +239,7 @@ harica-client auth delete --environment production --yes
 La cancellazione locale non revoca la chiave sul portale HARICA; in caso di compromissione
 occorre revocarla anche nel Certificate Manager.
 
-### Esecuzione tramite cron
+### Esecuzione pianificata su POSIX (cron)
 
 Usa un account di sistema dedicato e non privilegiato. Esempio di crontab:
 
@@ -220,6 +274,37 @@ troppo vecchia.
 Non inserire la chiave in `.zshrc`, `.profile`, crontab, argomenti della CLI o file nel
 repository. `HARICA_API_KEY` resta utile per automazioni effimere, come un job CI
 temporaneo, ma non è il metodo raccomandato per la persistenza su server.
+
+### Esecuzione pianificata su Windows (Utilità di pianificazione)
+
+Esegui prima `auth set` in modo interattivo con lo stesso account Windows che sarà
+associato all'attività:
+
+```powershell
+harica-client auth set --environment production
+harica-client auth status --environment production
+```
+
+Nell'Utilità di pianificazione usa quell'account anche se l'attività viene eseguita senza
+sessione interattiva. Imposta **Programma/script** sull'eseguibile dell'ambiente virtuale,
+per esempio `C:\Tools\harica-client\.venv\Scripts\harica-client.exe`, e
+**Aggiungi argomenti** su:
+
+```text
+cache refresh --environment production
+```
+
+Imposta **Avvia in** sulla directory di installazione o del repository. Crea un'azione o
+un'attività separata per un export basato sulla cache, per esempio:
+
+```text
+list --from-cache --max-cache-age 24 --status valid --csv C:\Harica\Export\certificati-validi.csv --force
+```
+
+Non inserire l'API key negli argomenti, negli script PowerShell o batch, né nella
+definizione dell'attività. DPAPI lega intenzionalmente chiave e cache protette allo
+stesso utente e computer: un'attività eseguita con un altro account non può decifrarle.
+Verifica che l'account possa scrivere nelle directory di export e log scelte.
 
 ## Utilizzo
 
@@ -289,8 +374,9 @@ harica-client cache status --environment production
 ```
 
 `cache refresh` interroga una volta gli stati `valid`, `revoked` ed `expired` e salva una
-cache JSON versionata. Le letture successive sono completamente locali e non richiedono
-l'API key:
+fotografia JSON con schema logico versione 1. Su Windows, prima della scrittura il JSON
+viene inserito in un contenitore DPAPI versionato. Le letture successive sono
+completamente locali e non richiedono l'API key:
 
 ```bash
 harica-client list --from-cache --status valid
@@ -307,18 +393,24 @@ senza effettuare fallback verso la rete:
 harica-client list --from-cache --max-cache-age 24 --status valid
 ```
 
-I percorsi predefiniti sono
+I percorsi POSIX predefiniti sono
 `${XDG_CACHE_HOME}/harica-client/certificates/{environment}.json` oppure
-`~/.cache/harica-client/certificates/{environment}.json`. È possibile usare
-`--cache-file PATH` o `HARICA_CLIENT_CACHE_FILE`; il flag ha la precedenza. Una
-`--base-url` personalizzata con `cache refresh` richiede un `--cache-file` esplicito.
+`~/.cache/harica-client/certificates/{environment}.json`. Su Windows il percorso
+predefinito è
+`%LOCALAPPDATA%\harica-client\certificates\{environment}.json.dpapi`, con fallback ad
+`AppData\Local` nel profilo dell'utente corrente. È possibile usare `--cache-file PATH`
+o `HARICA_CLIENT_CACHE_FILE`; il flag ha la precedenza. Su Windows gli override devono
+essere percorsi locali assoluti e restano protetti con DPAPI. Una `--base-url`
+personalizzata con `cache refresh` richiede un `--cache-file` esplicito.
 
-Le directory vengono create con permessi `0700` e i file con `0600`. Link simbolici,
-proprietario errato e accesso da parte di gruppo o altri vengono rifiutati. La scrittura
-è atomica, quindi un aggiornamento fallito conserva la cache precedente. La API key e il
-campo potenzialmente pesante `certificate` non vengono mai salvati, ma la cache può
-contenere hostname e indirizzi email sensibili: va tenuta fuori da repository e directory
-condivise.
+Su POSIX le directory vengono create con permessi `0700` e i file con `0600`; link
+simbolici, proprietario errato e accesso da parte di gruppo o altri vengono rifiutati.
+Su Windows la cache è cifrata e autenticata con DPAPI in ambito utente; vengono rifiutati
+link, junction, reparse point, percorsi relativi, UNC/device path e alternate data
+stream. La scrittura è atomica su ogni piattaforma, quindi un aggiornamento fallito
+conserva la cache precedente. La API key e il campo potenzialmente pesante `certificate`
+non vengono mai salvati, ma la cache decifrata può contenere hostname e indirizzi email
+sensibili: mantieni gli export fuori da repository e directory condivise.
 
 Per eliminarla esplicitamente:
 
@@ -510,7 +602,9 @@ Il riepilogo è destinato alla lettura umana e non è un formato dati stabile pe
 Senza `--output`, il nome viene costruito dal CN del subject e il file viene salvato
 nella directory corrente. I CN wildcard come `*.example.org` diventano
 `wildcard.example.org.pem`; i caratteri non sicuri per il filesystem vengono
-sostituiti. Se manca un CN utilizzabile viene usato il seriale del certificato. Più CN
+sostituiti. I nomi riservati Windows (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9` e
+`LPT1`–`LPT9`) ricevono un prefisso e i nomi automatici non terminano mai con punto o
+spazio. Se manca un CN utilizzabile viene usato il seriale del certificato. Più CN
 differenti richiedono un `--output` esplicito.
 
 `download` esegue sempre una ricerca puntuale in rete e richiede quindi l'API key. Non
@@ -520,7 +614,7 @@ opzioni di connessione documentate sopra.
 Viene scritto un solo certificato finale: chain, dati PKCS#7/PKCS#12, chiavi private,
 certificati concatenati e valori malformati vengono rifiutati. HARICA può restituire un
 PEM o un DER codificato in base64; il file salvato viene normalizzato in PEM con
-terminatori LF, newline finale e permessi `0644`.
+terminatori LF, newline finale e permessi `0644` su POSIX.
 
 Usa `--output` per scegliere un nome o una directory differenti. Un file regolare
 esistente resta intatto salvo l'uso di `--force`; link simbolici e destinazioni non
@@ -598,7 +692,8 @@ restituiscono `1`, mentre gli errori di uso/configurazione restituiscono `2`.
 ## Test
 
 I test usano trasporti HTTP simulati e un server HTTP loopback temporaneo. Non
-contattano mai HARICA:
+contattano mai HARICA. La CI esegue la suite trattando i `ResourceWarning` come errori
+su Python 3.11–3.14 in Linux e Windows, oltre a Python 3.14 su macOS:
 
 ```bash
 python -m unittest discover -s tests -v
@@ -633,7 +728,9 @@ Riferimenti ufficiali:
 
 Il progetto implementa esclusivamente i quattro endpoint `GET` elencati sopra. Non
 implementa emissione di certificati, approvazione o cancellazione di richieste, revoca
-di certificati o altre operazioni remote in scrittura.
+di certificati o altre operazioni remote in scrittura. Il supporto Windows iniziale è
+limitato a x64; Windows ARM64, la condivisione di file protetti DPAPI tra utenti o
+computer e la migrazione automatica di file Windows sperimentali restano fuori ambito.
 
 ## Licenza
 

@@ -19,6 +19,7 @@ from typing import Any
 
 from .errors import HaricaConfigurationError
 from .i18n import tr
+from .platform_storage import IS_WINDOWS
 
 _PEM_CERTIFICATE = re.compile(
     r"\A-----BEGIN CERTIFICATE-----\s*"
@@ -50,6 +51,14 @@ _OID_LABELS = {
     "2.5.4.11": "OU",
     "2.5.4.12": "title",
     "2.5.4.17": "postalCode",
+}
+_WINDOWS_RESERVED_STEMS = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{number}" for number in range(1, 10)),
+    *(f"LPT{number}" for number in range(1, 10)),
 }
 
 
@@ -176,7 +185,8 @@ def write_certificate_pem(
             text=True,
         )
         temporary_path = Path(temporary_name)
-        os.fchmod(descriptor, 0o644)
+        if not IS_WINDOWS:
+            os.fchmod(descriptor, 0o644)
         with os.fdopen(descriptor, "w", encoding="ascii", newline="\n") as stream:
             descriptor = None
             stream.write(certificate_pem)
@@ -423,6 +433,8 @@ def _safe_filename_stem(value: str, *, wildcard: bool) -> str:
         digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:12]
         prefix = safe[:187].rstrip(".")
         safe = f"{prefix}-{digest}"
+    if safe.partition(".")[0].upper() in _WINDOWS_RESERVED_STEMS:
+        safe = f"_{safe}"
     return safe
 
 

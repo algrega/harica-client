@@ -9,8 +9,14 @@
 Until a formal public release policy is established, only the latest code on the
 `main` branch is supported.
 
-The supported platforms are Linux, macOS, and other POSIX-compatible systems.
-Windows is not currently supported.
+The supported platforms are Linux, macOS, other POSIX-compatible systems, and
+supported x64 editions of Windows 10, Windows 11, and Windows Server with Python
+3.11–3.14. Windows ARM64 is not currently supported.
+
+On Windows, API keys and caches are protected with user-scoped DPAPI. This does not
+make them portable: protected files are intended for the same user on the same
+computer. Report any plaintext disclosure, integrity bypass, reparse-point bypass,
+or cross-user/cross-machine access as a vulnerability.
 
 ### Reporting a vulnerability
 
@@ -35,8 +41,14 @@ Certificate Manager. Do not wait for the report to be reviewed.
 Fino alla definizione di una politica formale per le release pubbliche, è supportato
 soltanto il codice più recente del branch `main`.
 
-Le piattaforme supportate sono Linux, macOS e gli altri sistemi compatibili POSIX.
-Windows non è attualmente supportato.
+Le piattaforme supportate sono Linux, macOS, gli altri sistemi compatibili POSIX e
+le edizioni x64 supportate di Windows 10, Windows 11 e Windows Server con Python
+3.11–3.14. Windows ARM64 non è attualmente supportato.
+
+Su Windows API key e cache sono protette con DPAPI in ambito utente. I file protetti
+non sono portabili: sono destinati allo stesso utente sullo stesso computer. Segnala
+come vulnerabilità qualsiasi esposizione in chiaro, aggiramento dell'integrità o dei
+controlli sui reparse point, oppure accesso tra utenti o computer diversi.
 
 ### Segnalazione di una vulnerabilità
 

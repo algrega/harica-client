@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -44,13 +45,19 @@ class StatsCliTests(unittest.TestCase):
             },
         ]
 
-    def _write_cache(self, root: Path, *, age_hours: float = 0) -> Path:
+    def _write_cache(
+        self,
+        root: Path,
+        *,
+        age_hours: float = 0,
+        records: list[dict[str, object]] | None = None,
+    ) -> Path:
         target = root / "private" / "production.json"
         write_cache(
             target,
             environment="production",
             base_url="https://cm.harica.gr",
-            certificates=self._records(),
+            certificates=self._records() if records is None else records,
             now=datetime.now(UTC) - timedelta(hours=age_hours),
         )
         return target
@@ -63,7 +70,11 @@ class StatsCliTests(unittest.TestCase):
                     output = io.StringIO()
                     errors = io.StringIO()
                     with (
-                        patch.dict("os.environ", {"HOME": directory}, clear=True),
+                        patch.dict(
+                            "os.environ",
+                            {"HARICA_CLIENT_LANGUAGE": "it"},
+                            clear=True,
+                        ),
                         patch(
                             "harica_client.cli._client_from_args",
                             side_effect=AssertionError("network must not be used"),
@@ -221,11 +232,9 @@ class StatsCliTests(unittest.TestCase):
     def test_expirations_table_is_localized_and_sanitized(self) -> None:
         malicious = "portal.example.org\x1b[2J\u202e"
         with tempfile.TemporaryDirectory() as directory:
-            target = self._write_cache(Path(directory))
-            payload = json.loads(target.read_text(encoding="utf-8"))
-            payload["certificates"][0]["dN"] = f"C=IT,CN={malicious}"
-            target.write_text(json.dumps(payload), encoding="utf-8")
-            target.chmod(0o600)
+            records = self._records()
+            records[0]["dN"] = f"C=IT,CN={malicious}"
+            target = self._write_cache(Path(directory), records=records)
             output = io.StringIO()
             with redirect_stdout(output), redirect_stderr(io.StringIO()):
                 code = main(
@@ -248,11 +257,9 @@ class StatsCliTests(unittest.TestCase):
 
     def test_expirations_warns_about_invalid_dates_and_rejects_invalid_within(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            target = self._write_cache(Path(directory))
-            payload = json.loads(target.read_text(encoding="utf-8"))
-            payload["certificates"][0]["validTo"] = "invalid"
-            target.write_text(json.dumps(payload), encoding="utf-8")
-            target.chmod(0o600)
+            records = self._records()
+            records[0]["validTo"] = "invalid"
+            target = self._write_cache(Path(directory), records=records)
             errors = io.StringIO()
             with redirect_stdout(io.StringIO()), redirect_stderr(errors):
                 code = main(
@@ -314,8 +321,12 @@ class StatsCliTests(unittest.TestCase):
     def test_minimal_cron_environment_uses_default_cache(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             environment = {
-                "HOME": directory,
-                "PATH": "/usr/bin:/bin",
+                **(
+                    {"APPDATA": directory, "LOCALAPPDATA": directory}
+                    if os.name == "nt"
+                    else {"HOME": directory}
+                ),
+                "PATH": os.environ.get("PATH", ""),
                 "HARICA_CLIENT_LANGUAGE": "en",
             }
             target = default_cache_path("production", environ=environment)

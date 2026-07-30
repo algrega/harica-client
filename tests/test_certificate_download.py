@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import io
+import os
 import ssl
 import stat
 import tempfile
@@ -242,6 +243,14 @@ class AutomaticFilenameTests(unittest.TestCase):
         self.assertEqual(len(first.removesuffix(".pem")), 200)
         self.assertRegex(first, r"-[0-9a-f]{12}\.pem$")
 
+    def test_windows_reserved_names_are_prefixed(self) -> None:
+        cases = ("CON", "con.txt", "PRN", "AUX", "NUL", "COM1", "com9.log", "LPT1")
+        for common_name in cases:
+            with self.subTest(common_name=common_name):
+                filename = automatic_download_filename(self._summary(common_name))
+                self.assertTrue(filename.startswith("_"))
+                self.assertTrue(filename.endswith(".pem"))
+
     def test_name_parser_collects_common_names_structurally(self) -> None:
         first = _tlv(0x06, b"\x55\x04\x03") + _tlv(0x0C, b"one.example.org")
         second = _tlv(0x06, b"\x55\x04\x03") + _tlv(0x0C, b"two.example.org")
@@ -264,7 +273,8 @@ class CertificateDestinationTests(unittest.TestCase):
 
             self.assertEqual(written, target)
             self.assertEqual(target.read_text(encoding="ascii"), CERTIFICATE_PEM)
-            self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o644)
+            if os.name != "nt":
+                self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o644)
             self.assertEqual(list(target.parent.glob(f".{target.name}.*.tmp")), [])
 
     def test_existing_file_requires_force_and_force_replaces_it(self) -> None:
@@ -277,6 +287,7 @@ class CertificateDestinationTests(unittest.TestCase):
             write_certificate_pem(target, CERTIFICATE_PEM, force=True)
             self.assertEqual(target.read_text(encoding="ascii"), CERTIFICATE_PEM)
 
+    @unittest.skipIf(os.name == "nt", "creazione symlink non sempre autorizzata")
     def test_rejects_symlink_and_non_regular_destination_even_with_force(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -416,6 +427,7 @@ class DownloadCliTests(unittest.TestCase):
             self.assertEqual(replaced, 0)
             self.assertEqual(target.read_text(encoding="ascii"), CERTIFICATE_PEM)
 
+    @unittest.skipIf(os.name == "nt", "creazione symlink non sempre autorizzata")
     def test_automatic_destination_rejects_symlink_even_with_force(self) -> None:
         client = Mock()
         client.certificate_by_serial.return_value = {"certificate": CERTIFICATE_PEM}
