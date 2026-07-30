@@ -314,10 +314,15 @@ harica-client serial 'SERIAL-NUMBER' --json
 harica-client serial 'SERIAL-NUMBER' --csv certificate.csv
 harica-client download 'SERIAL-NUMBER'
 harica-client download 'SERIAL-NUMBER' --output certificate.pem
+harica-client cache refresh --environment production
+harica-client cache status --environment production
+harica-client list --from-cache --status valid
+harica-client list --from-cache --max-cache-age 24 --status all --json
 harica-client stats summary
 harica-client stats expirations --within 30
 harica-client stats owners
 harica-client stats quality
+harica-client cache delete --environment production
 ```
 
 ### Connection options
